@@ -274,20 +274,23 @@ def remove(specs: List[str], update: bool, prune: bool):
 
 
 @cli.command()
-@click.option("--micromamba/--no-micromamba", default=True, is_flag=True)
-def shell(micromamba):
-    exe = current_exe()
+def shell():
+    from ensureconda.resolve import (conda_executables, micromamba_executables)
 
+    exe = current_exe()
     shell = os.path.basename(os.environ["SHELL"])
-    shell_exe = Path(determine_conda_executable(None, mamba=False, micromamba=micromamba))
     prefix = current_prefix(exe)
 
-    if is_micromamba(shell_exe):
-        print(f"eval \"$('{shell_exe}' shell hook -s {shell})\";")
-        print(f"micromamba activate \"{prefix}\"")
-    else:
-        print(f"eval \"$('{shell_exe}' shell.{shell} hook)\";")
+    # shell only seems to work properly with conda and micromamba
+    conda_exe = safe_next(conda_executables())
+    if conda_exe:
+        print(f"eval \"$('{conda_exe}' shell.{shell} hook)\";")
         print(f"conda activate \"{prefix}\"")
+        return
+
+    micromamba_exe = next(micromamba_executables())
+    print(f"eval \"$('{micromamba_exe}' shell hook -s {shell})\";")
+    print(f"micromamba activate \"{prefix}\"")
 
 
 if __name__ == "__main__":
