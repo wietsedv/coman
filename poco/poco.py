@@ -5,6 +5,7 @@ import subprocess
 import json
 from hashlib import md5
 from pathlib import Path
+import sys
 
 import click
 from conda_lock.conda_lock import determine_conda_executable, is_micromamba
@@ -22,9 +23,9 @@ def current_exe():
     return Path(determine_conda_executable(None, mamba=True, micromamba=False))
 
 
-def current_envs_dir(exe: PathLike):
+def current_info(exe: PathLike):
     res = json.loads(subprocess.check_output([exe, "info", "--json"], encoding="utf-8"))
-    return Path(res["envs_dirs"][0])
+    return res
 
 
 def current_name():
@@ -35,12 +36,15 @@ def current_name():
 
 
 def current_prefix(exe: PathLike):
-    envs_dir = current_envs_dir(exe)
+    envs_dir = Path(current_info(exe)["envs_dirs"][0])
     return envs_dir / current_name()
 
 
 def current_platforms():
-    return [platform_subdir()]
+    import ruamel.yaml
+    with open("environment.yml") as f:
+        env = ruamel.yaml.safe_load(f)
+    return env.get("platforms", [platform_subdir()])
 
 
 def repoquery_search(exe: PathLike, spec: str, channels: List[str]):
@@ -79,14 +83,17 @@ def info(name, prefix, platform):
                                      conda_standalone_executables)
     from ensureconda.api import (determine_mamba_version, determine_micromamba_version, determine_conda_version)
 
-    print(f"Platforms: {current_platforms()} [{platform_subdir()}]")
+    print("Python:")
+    print(sys.version)
+
+    print(f"\nPlatforms: {current_platforms()} [{platform_subdir()}]")
 
     print("\nAvailable executables:")
 
     mamba_exe = safe_next(mamba_executables())
     if mamba_exe:
         mamba_ver = determine_mamba_version(mamba_exe)
-        print(f"Mamba:            [{mamba_ver}] {mamba_exe} [{current_envs_dir(mamba_exe)}]")
+        print(f"Mamba:            [{mamba_ver}] {mamba_exe}")
 
     micromamba_exe = safe_next(micromamba_executables())
     if micromamba_exe:
@@ -96,14 +103,12 @@ def info(name, prefix, platform):
     conda_exe = safe_next(conda_executables())
     if conda_exe:
         conda_ver = determine_conda_version(conda_exe)
-        print(f"Conda:            [{conda_ver}] {conda_exe} [{current_envs_dir(conda_exe)}]")
+        print(f"Conda:            [{conda_ver}] {conda_exe}")
 
     condastandalone_exe = safe_next(conda_standalone_executables())
     if condastandalone_exe:
         condastandalone_ver = determine_conda_version(condastandalone_exe)
-        print(
-            f"Conda standalone: [{condastandalone_ver}] {condastandalone_exe} [{current_envs_dir(condastandalone_exe)}]"
-        )
+        print(f"Conda standalone: [{condastandalone_ver}] {condastandalone_exe}")
 
 
 @cli.command()
@@ -117,11 +122,7 @@ def _lock(platforms: List[str] = None):
     from conda_lock.conda_lock import run_lock
     from glob import glob
 
-    if platforms is None:
-        import ruamel.yaml
-        with open("environment.yml") as f:
-            env = ruamel.yaml.safe_load(f)
-        platforms = env.get("platforms", [platform_subdir()])
+    platforms = platforms or current_platforms()
 
     lock_template = "conda-{platform}.lock"
     lock_files = [lock_template.format(platform=p) for p in platforms]
