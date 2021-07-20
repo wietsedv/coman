@@ -274,7 +274,7 @@ def remove(specs: List[str], update: bool, prune: bool):
 
 
 @cli.command()
-@click.option("--micromamba/--no-micromamba", default=False, is_flag=True)
+@click.option("--micromamba/--no-micromamba", default=True, is_flag=True)
 def shell(micromamba):
     exe = current_exe()
 
