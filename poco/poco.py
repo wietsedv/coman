@@ -157,7 +157,7 @@ def _install(prune: bool):
 
     args = [
         str(exe),
-        "create" if prune else "update",
+        "create" if prune or not prefix.exists() else "update",
         "--file",
         str(lock_file),
         "--prefix",
