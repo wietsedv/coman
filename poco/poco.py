@@ -11,6 +11,8 @@ import click
 from conda_lock.conda_lock import determine_conda_executable, is_micromamba
 from ensureconda.resolve import platform_subdir
 
+from ._version import __version__
+
 
 def safe_next(it: Iterator[PathLike]):
     try:
@@ -23,9 +25,9 @@ def current_exe():
     return Path(determine_conda_executable(None, mamba=True, micromamba=False))
 
 
-def current_info(exe: PathLike):
+def current_envs_dir(exe: PathLike):
     res = json.loads(subprocess.check_output([exe, "info", "--json"], encoding="utf-8"))
-    return res
+    return Path(res["envs_dirs"][0])
 
 
 def current_name():
@@ -36,11 +38,14 @@ def current_name():
 
 
 def current_prefix(exe: PathLike):
-    envs_dir = Path(current_info(exe)["envs_dirs"][0])
+    envs_dir = current_envs_dir(exe)
     return envs_dir / current_name()
 
 
 def current_platforms():
+    if not os.path.exists("environment.yml"):
+        return []
+
     import ruamel.yaml
     with open("environment.yml") as f:
         env = ruamel.yaml.safe_load(f)
@@ -83,32 +88,43 @@ def info(name, prefix, platform):
                                      conda_standalone_executables)
     from ensureconda.api import (determine_mamba_version, determine_micromamba_version, determine_conda_version)
 
-    print("Python:")
-    print(sys.version)
+    exe = current_exe()
 
-    print(f"\nPlatforms: {current_platforms()} [{platform_subdir()}]")
+    prefix = current_prefix(exe)
+    print("Current environment:")
+    print(f"> Prefix: {prefix} [{'ok' if prefix.exists() else 'not found'}]")
+    print(f"> Platform: {platform_subdir()}")
 
-    print("\nAvailable executables:")
+    print("\nPoco:")
+    print(f"> Version:  v{__version__}")
+    py = sys.version_info
+    print(f"> Python:   v{py.major}.{py.minor}.{py.micro}")
+    print(f"> Envs dir: {current_envs_dir(exe)}")
 
+    print("\nConda:")
     mamba_exe = safe_next(mamba_executables())
+    mamba_ver = "n/a"
     if mamba_exe:
-        mamba_ver = determine_mamba_version(mamba_exe)
-        print(f"Mamba:            [{mamba_ver}] {mamba_exe}")
+        mamba_ver = f"v{determine_mamba_version(mamba_exe)} [{mamba_exe}]"
+    print(f"> Mamba:            {mamba_ver}")
 
     micromamba_exe = safe_next(micromamba_executables())
+    micromamba_ver = "n/a"
     if micromamba_exe:
-        micromamba_ver = determine_micromamba_version(micromamba_exe)
-        print(f"Micromamba:       [{micromamba_ver}] {micromamba_exe}")
+        micromamba_ver = f"v{determine_micromamba_version(micromamba_exe)} [{micromamba_exe}]"
+    print(f"> Micromamba:       {micromamba_ver}")
 
     conda_exe = safe_next(conda_executables())
+    conda_ver = "n/a"
     if conda_exe:
-        conda_ver = determine_conda_version(conda_exe)
-        print(f"Conda:            [{conda_ver}] {conda_exe}")
+        conda_ver = f"v{determine_conda_version(conda_exe)} [{conda_exe}]"
+    print(f"> Conda:            {conda_ver}")
 
     condastandalone_exe = safe_next(conda_standalone_executables())
+    condastandalone_ver = "n/a"
     if condastandalone_exe:
-        condastandalone_ver = determine_conda_version(condastandalone_exe)
-        print(f"Conda standalone: [{condastandalone_ver}] {condastandalone_exe}")
+        condastandalone_ver = f"v{determine_conda_version(condastandalone_exe)} [{condastandalone_exe}]"
+    print(f"> Conda standalone: {condastandalone_ver}")
 
 
 @cli.command()
