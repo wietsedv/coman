@@ -8,7 +8,8 @@ from pathlib import Path
 import sys
 
 import click
-from conda_lock.conda_lock import determine_conda_executable, is_micromamba
+from conda_lock.conda_lock import determine_conda_executable
+from ensureconda.installer import install_conda_exe
 from ensureconda.resolve import platform_subdir
 
 from ._version import __version__
@@ -87,6 +88,7 @@ def info(name, prefix, platform):
     from ensureconda.resolve import (mamba_executables, micromamba_executables, conda_executables,
                                      conda_standalone_executables)
     from ensureconda.api import (determine_mamba_version, determine_micromamba_version, determine_conda_version)
+    from ensureconda.installer import install_micromamba
 
     exe = current_exe()
 
@@ -108,7 +110,7 @@ def info(name, prefix, platform):
         mamba_ver = f"v{determine_mamba_version(mamba_exe)} [{mamba_exe}]"
     print(f"> Mamba:            {mamba_ver}")
 
-    micromamba_exe = safe_next(micromamba_executables())
+    micromamba_exe = safe_next(micromamba_executables()) or install_micromamba()
     micromamba_ver = "n/a"
     if micromamba_exe:
         micromamba_ver = f"v{determine_micromamba_version(micromamba_exe)} [{micromamba_exe}]"
@@ -120,7 +122,7 @@ def info(name, prefix, platform):
         conda_ver = f"v{determine_conda_version(conda_exe)} [{conda_exe}]"
     print(f"> Conda:            {conda_ver}")
 
-    condastandalone_exe = safe_next(conda_standalone_executables())
+    condastandalone_exe = safe_next(conda_standalone_executables()) or install_conda_exe()
     condastandalone_ver = "n/a"
     if condastandalone_exe:
         condastandalone_ver = f"v{determine_conda_version(condastandalone_exe)} [{condastandalone_exe}]"
