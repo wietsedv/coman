@@ -1,11 +1,12 @@
 from os import PathLike
 import os
-from typing import Callable, Iterator, List, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple
 import subprocess
 import json
 from hashlib import md5
 from pathlib import Path
 import sys
+import re
 
 import click
 from conda_lock.conda_lock import determine_conda_executable
@@ -13,6 +14,8 @@ from ensureconda.installer import install_conda_exe
 from ensureconda.resolve import platform_subdir
 
 from ._version import __version__
+
+ENV_HASH_PATTERN = re.compile(r"^# env_hash: (.*)$")
 
 
 def safe_next(it: Iterator[PathLike]):
@@ -22,12 +25,16 @@ def safe_next(it: Iterator[PathLike]):
         return None
 
 
+def is_mamba(exe: PathLike) -> bool:
+    return str(exe).endswith("/mamba")
+
+
 def current_exe():
     return Path(determine_conda_executable(None, mamba=True, micromamba=False))
 
 
 def current_envs_dir(exe: PathLike):
-    res = json.loads(subprocess.check_output([exe, "info", "--json"], encoding="utf-8"))
+    res = json.loads(subprocess.check_output([exe, "info", "--json"]))
     return Path(res["envs_dirs"][0])
 
 
@@ -41,6 +48,18 @@ def current_name():
 def current_prefix(exe: PathLike):
     envs_dir = current_envs_dir(exe)
     return envs_dir / current_name()
+
+
+def current_env_hash(prefix: Path) -> Optional[str]:
+    env_hash_file = prefix / "env_hash.txt"
+    if env_hash_file.exists():
+        with open(env_hash_file) as f:
+            return f.read().strip()
+
+
+def save_env_hash(prefix: Path, env_hash: str):
+    with open(prefix / "env_hash.txt", "w") as f:
+        f.write(env_hash)
 
 
 def current_platforms():
@@ -57,8 +76,7 @@ def repoquery_search(exe: PathLike, spec: str, channels: List[str]):
     args = []
     for c in channels:
         args.extend(["-c", c])
-    res = json.loads(subprocess.check_output([exe, "repoquery", "search", spec, *args, "--json"],
-                                             encoding="utf-8"))["result"]
+    res = json.loads(subprocess.check_output([exe, "repoquery", "search", spec, *args, "--json"]))["result"]
     if res["msg"]:
         print(res["msg"])
         exit(1)
@@ -122,7 +140,10 @@ def info(name, prefix, platform):
         conda_ver = f"v{determine_conda_version(conda_exe)} [{conda_exe}]"
     print(f"> Conda:            {conda_ver}")
 
-    condastandalone_exe = safe_next(conda_standalone_executables()) or install_conda_exe()
+    try:
+        condastandalone_exe = safe_next(conda_standalone_executables()) or install_conda_exe()
+    except IndexError:
+        condastandalone_exe = None
     condastandalone_ver = "n/a"
     if condastandalone_exe:
         condastandalone_ver = f"v{determine_conda_version(condastandalone_exe)} [{condastandalone_exe}]"
@@ -133,7 +154,7 @@ def info(name, prefix, platform):
 @click.argument("query", nargs=-1)
 def list(query: List[str]):
     exe = current_exe()
-    subprocess.run([exe, "list", *query, "--quiet"])
+    subprocess.run([exe, "list", "--prefix", current_prefix(exe), *query, "--quiet"])
 
 
 def _lock(platforms: List[str] = None):
@@ -161,17 +182,30 @@ def _lock(platforms: List[str] = None):
     )
 
 
-def _install(prune: bool):
+def extract_env_hash(lock: str) -> str:
+    for line in lock.strip().split("\n"):
+        m = ENV_HASH_PATTERN.search(line)
+        if m:
+            return m.group(1)
+    raise RuntimeError("Cannot find env_hash in lockfile")
+
+
+def _install(prune: bool, lazy: bool = False, **kwargs):
     from conda_lock.conda_lock import do_validate_platform
 
-    exe = current_exe()
-    prefix = current_prefix(exe)
+    exe = kwargs.get("exe", current_exe())
+    prefix = kwargs.get("prefix", current_prefix(exe))
+
     lock_file = Path(f"conda-{platform_subdir()}.lock")
     if not lock_file.exists():
         _lock()
-
     with open(lock_file) as f:
-        do_validate_platform(f.read())
+        lock_str = f.read()
+
+    do_validate_platform(lock_str)
+    env_hash = extract_env_hash(lock_str)
+    if lazy and env_hash == current_env_hash(prefix):
+        return
 
     args = [
         str(exe),
@@ -188,6 +222,8 @@ def _install(prune: bool):
         print(p.stderr)
         print(f"Could not perform conda install using {lock_file} lock file into {prefix}")
         exit(1)
+
+    save_env_hash(prefix, env_hash)
 
 
 @cli.command()
@@ -293,11 +329,12 @@ def remove(specs: List[str], update: bool, prune: bool):
 
 @cli.command()
 def shell():
-    from ensureconda.resolve import (conda_executables, micromamba_executables)
+    from ensureconda.resolve import conda_executables, micromamba_executables
 
-    exe = current_exe()
     shell = os.path.basename(os.environ["SHELL"])
+    exe = current_exe()
     prefix = current_prefix(exe)
+    _install(prune=False, lazy=True, exe=exe, prefix=prefix)
 
     # shell only seems to work properly with conda and micromamba
     conda_exe = safe_next(conda_executables())
@@ -309,6 +346,19 @@ def shell():
     micromamba_exe = next(micromamba_executables())
     print(f"eval \"$('{micromamba_exe}' shell hook -s {shell})\";")
     print(f"micromamba activate \"{prefix}\"")
+
+
+@cli.command()
+@click.argument("args", nargs=-1)
+def run(args):
+    exe = current_exe()
+    prefix = current_prefix(exe)
+    _install(prune=False, lazy=True, exe=exe, prefix=prefix)
+
+    if is_mamba(exe):
+        exe = determine_conda_executable(None, mamba=False, micromamba=False)
+
+    subprocess.run([exe, "run", "--prefix", prefix, "--no-capture-out", "--live-stream", *args])
 
 
 if __name__ == "__main__":
