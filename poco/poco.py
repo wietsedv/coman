@@ -11,7 +11,7 @@ import re
 import click
 from conda_lock.conda_lock import determine_conda_executable
 from ensureconda.installer import install_conda_exe
-from ensureconda.resolve import platform_subdir
+from ensureconda.resolve import conda_executables, micromamba_executables, platform_subdir
 
 from ._version import __version__
 
@@ -27,6 +27,10 @@ def safe_next(it: Iterator[PathLike]):
 
 def is_mamba(exe: PathLike) -> bool:
     return str(exe).endswith("/mamba")
+
+
+def is_conda(exe: PathLike) -> bool:
+    return str(exe).endswith("/conda")
 
 
 def current_exe():
@@ -328,20 +332,20 @@ def remove(specs: List[str], update: bool, prune: bool):
 
 
 @cli.command()
-def shell():
-    from ensureconda.resolve import conda_executables, micromamba_executables
-
+@click.option("--force-micromamba", default=False, is_flag=True)
+def shell(force_micromamba: bool):
     shell = os.path.basename(os.environ["SHELL"])
     exe = current_exe()
     prefix = current_prefix(exe)
     _install(prune=False, lazy=True, exe=exe, prefix=prefix)
 
     # shell only seems to work properly with conda and micromamba
-    conda_exe = safe_next(conda_executables())
-    if conda_exe:
-        print(f"eval \"$('{conda_exe}' shell.{shell} hook)\";")
-        print(f"conda activate \"{prefix}\"")
-        return
+    if not force_micromamba:
+        conda_exe = safe_next(conda_executables())
+        if conda_exe:
+            print(f"eval \"$('{conda_exe}' shell.{shell} hook)\";")
+            print(f"conda activate \"{prefix}\"")
+            return
 
     micromamba_exe = next(micromamba_executables())
     print(f"eval \"$('{micromamba_exe}' shell hook -s {shell})\";")
@@ -355,8 +359,12 @@ def run(args):
     prefix = current_prefix(exe)
     _install(prune=False, lazy=True, exe=exe, prefix=prefix)
 
-    if is_mamba(exe):
-        exe = determine_conda_executable(None, mamba=False, micromamba=False)
+    # Currently only works with regular conda executable
+    if not is_conda(exe):
+        exe = safe_next(conda_executables())
+    if not exe:
+        print("Poco run only works if regular conda is available on your system.")
+        exit(1)
 
     subprocess.run([exe, "run", "--prefix", prefix, "--no-capture-out", "--live-stream", *args])
 
