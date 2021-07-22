@@ -1,5 +1,8 @@
 # Coma: Conda Manager
 
+[![PyPI](https://img.shields.io/pypi/v/coma)](https://pypi.org/project/coma/)
+![PyPI - License](https://img.shields.io/pypi/l/coma)
+
 A simple CLI for Conda dependency management. Coma gives you simple commands to manage dependencies in your `environment.yml` and properly uses lockfiles. Moreover, it manages unique Conda environments per project directory. Coma mimicks the workflow of [Poetry](https://github.com/python-poetry/poetry) (or any other modern dependency manager), but then for Conda.
 
 **Warning:** Coma is work in progress and may not work in every scenario. 
