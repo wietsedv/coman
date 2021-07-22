@@ -94,7 +94,7 @@ def save_env_hash(prefix: Path, env_hash: str):
         f.write(env_hash)
 
 
-def current_platforms():
+def current_platforms() -> List[str]:
     if not env_file().exists():
         return []
 
@@ -120,6 +120,7 @@ def current_env_spec() -> Tuple[dict, Callable]:
     def save_func():
         with open(environment_file, "w") as f:
             yaml_.dump(env, f)
+        _lock()
 
     return env, save_func
 
@@ -153,7 +154,7 @@ def extract_env_hash(lock_str: str) -> str:
 
 
 class NaturalOrderGroup(click.Group):
-    def list_commands(self, ctx):
+    def list_commands(self, _):
         return self.commands.keys()
 
 
@@ -274,8 +275,8 @@ def init():
     print(f"initialized environment.yml and conda-{platform_subdir()}.lock")
 
 
-def _lock(platforms: List[str] = None):
-    platforms = platforms or current_platforms()
+def _lock():
+    platforms = current_platforms()
 
     lock_files = [str(lock_file(p)) for p in platforms]
     for filename in glob(str(lock_file("*"))):
@@ -285,7 +286,7 @@ def _lock(platforms: List[str] = None):
     run_lock(
         environment_files=[env_file()],
         conda_exe=None,
-        platforms=platforms or [platform_subdir()],
+        platforms=platforms,
         mamba=True,
         micromamba=False,
         include_dev_dependencies=True,
@@ -369,21 +370,16 @@ def update(prune: bool):
     _install(prune)
 
 
-@cli.command()
-@click.argument("specs", nargs=-1)
-@click.option("--update/--no-update", default=True, is_flag=True)
-@click.option("--prune", default=False, is_flag=True)
-def add(specs: List[str], update: bool, prune: bool):
-    """
-    Add a package to environment.yml, update the lock file(s) and install the environment
-    """
+def change_specs(add_specs: List[str] = [], remove_specs: List[str] = []):
     env, save_func = current_env_spec()
     exe = current_exe()
+    prefix = current_prefix(exe)
 
     dep_names = [spec.split(" ")[0] for spec in env["dependencies"]]
-
     changed = False
-    for spec in specs:
+
+    # Add
+    for spec in add_specs:
         pkg = repoquery_search(exe, spec, env["channels"])
         name = pkg['name']
         spec = f"{name} >={pkg['version']}"
@@ -399,26 +395,8 @@ def add(specs: List[str], update: bool, prune: bool):
         dep_names.insert(i, name)
         changed = True
 
-    if changed:
-        save_func()
-        if update:
-            _lock(env.get("platforms", [platform_subdir()]))
-            _install(prune)
-
-
-@cli.command()
-@click.argument("specs", nargs=-1)
-@click.option("--update/--no-update", default=True, is_flag=True)
-@click.option("--prune", default=False, is_flag=True)
-def remove(specs: List[str], update: bool, prune: bool):
-    """
-    Remove a package from environment.yml, update the lock file(s) and install the environment
-    """
-    env, save_func = current_env_spec()
-    dep_names = [spec.split(" ")[0] for spec in env["dependencies"]]
-
-    changed = False
-    for spec in specs:
+    # Remove
+    for spec in remove_specs:
         if spec not in dep_names:
             print(f"Dependency {spec} not found")
             continue
@@ -427,11 +405,29 @@ def remove(specs: List[str], update: bool, prune: bool):
         dep_names.pop(i)
         changed = True
 
+    # Update
     if changed:
         save_func()
-        if update:
-            _lock(env.get("platforms", [platform_subdir()]))
-            _install(prune)
+        if prefix.exists():
+            _install(prune=False, lazy=True, exe=exe, prefix=prefix)
+
+
+@cli.command()
+@click.argument("specs", nargs=-1)
+def add(specs: List[str]):
+    """
+    Add a package to environment.yml, update the lock file(s) and install the environment
+    """
+    change_specs(add_specs=specs)
+
+
+@cli.command()
+@click.argument("specs", nargs=-1)
+def remove(specs: List[str]):
+    """
+    Remove a package from environment.yml, update the lock file(s) and install the environment
+    """
+    change_specs(remove_specs=specs)
 
 
 @cli.command()
