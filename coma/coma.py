@@ -3,21 +3,37 @@ import os
 import re
 import subprocess
 import sys
+from distutils.version import LooseVersion
 from glob import glob
 from hashlib import md5
 from pathlib import Path
 from typing import Callable, Iterator, List, Optional, Tuple
 
-import click
-from conda_lock.conda_lock import determine_conda_executable, run_lock
+from ensureconda import ensureconda
 from ensureconda.api import (determine_conda_version, determine_mamba_version, determine_micromamba_version)
 from ensureconda.installer import install_conda_exe, install_micromamba
 from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
                                  micromamba_executables, platform_subdir)
 
+import click
+import ruamel.yaml as yaml
+from conda_lock.conda_lock import run_lock
+
 from ._version import __version__
 
 ENV_HASH_PATTERN = re.compile(r"^# env_hash: (.*)$")
+PLATFORM_PATTERN = re.compile(r"^# platform: (.*)$")
+
+MIN_CONDA_VERSION = LooseVersion("4.9")
+MIN_MAMBA_VERSION = LooseVersion("0.15")
+
+
+def env_file():
+    return Path("environment.yml")
+
+
+def lock_file(platform: str):
+    return Path(f"conda-{platform}.lock")
 
 
 def safe_next(it: Iterator[os.PathLike]):
@@ -36,7 +52,17 @@ def is_conda(exe: Path) -> bool:
 
 
 def current_exe():
-    return Path(determine_conda_executable(None, mamba=True, micromamba=False))
+    exe = ensureconda(
+        mamba=True,
+        micromamba=False,
+        conda=True,
+        conda_exe=True,
+        min_mamba_version=MIN_MAMBA_VERSION,
+        min_conda_version=MIN_CONDA_VERSION,
+    )
+    if not exe:
+        raise RuntimeError("No valid conda installation was found")
+    return Path(exe)
 
 
 def current_envs_dir(exe: Path):
@@ -69,13 +95,33 @@ def save_env_hash(prefix: Path, env_hash: str):
 
 
 def current_platforms():
-    if not os.path.exists("environment.yml"):
+    if not env_file().exists():
         return []
 
-    import ruamel.yaml
-    with open("environment.yml") as f:
-        env = ruamel.yaml.safe_load(f)
+    with open(env_file()) as f:
+        env = yaml.safe_load(f)
     return env.get("platforms", [platform_subdir()])
+
+
+def current_env_spec() -> Tuple[dict, Callable]:
+    environment_file = env_file()
+    if not env_file().exists():
+        raise FileNotFoundError(f"{environment_file} not found")
+
+    yaml_ = yaml.YAML()
+    with open(environment_file) as f:
+        env = yaml_.load(f)
+
+    if "channels" not in env:
+        env["channels"] = ["conda-forge"]
+    if "dependencies" not in env:
+        env["dependencies"] = ["python"]
+
+    def save_func():
+        with open(environment_file, "w") as f:
+            yaml_.dump(env, f)
+
+    return env, save_func
 
 
 def repoquery_search(exe: Path, spec: str, channels: List[str]):
@@ -88,6 +134,14 @@ def repoquery_search(exe: Path, spec: str, channels: List[str]):
         exit(1)
     pkg = max(res["pkgs"], key=lambda pkg: pkg["timestamp"])
     return pkg
+
+
+def extract_platform(lock_str: str) -> str:
+    for line in lock_str.strip().split("\n"):
+        m = PLATFORM_PATTERN.search(line)
+        if m:
+            return m.group(1)
+    raise RuntimeError("Cannot find platform in lockfile")
 
 
 def extract_env_hash(lock_str: str) -> str:
@@ -130,19 +184,15 @@ def info(name, prefix, platform):
     platform = platform_subdir()
 
     print("Current environment")
-
-    env_file = Path("environment.yml")
-    lock_file = Path(f"conda-{platform}.lock")
-
     env_status = "up-to-date"
-    if not env_file.exists():
+    if not env_file().exists():
         env_status = "no environment.yml (run `coma init`)"
-    elif not lock_file.exists():
+    elif not lock_file(platform).exists():
         env_status = f"no lock file for this platform (run `coma lock`)"
     elif not prefix.exists():
         env_status = "not installed (run `coma install`)"
     else:
-        with open(lock_file) as f:
+        with open(lock_file(platform)) as f:
             lock_str = f.read()
         if extract_env_hash(lock_str) != current_env_hash(prefix):
             env_status = "outdated (run `coma install`)"
@@ -152,37 +202,54 @@ def info(name, prefix, platform):
     print(f"> Status:   {env_status}")
 
     print("\nComa")
-    print(f"> Version:  v{__version__}")
+    print(f"> Version:  {__version__}")
     py = sys.version_info
-    print(f"> Python:   v{py.major}.{py.minor}.{py.micro}")
+    print(f"> Python:   {py.major}.{py.minor}.{py.micro}")
     print(f"> Envs dir: {current_envs_dir(exe)}")
 
     print("\nConda")
+
+    # Mamba
     mamba_exe = safe_next(mamba_executables())
     mamba_ver = "n/a"
     if mamba_exe:
-        mamba_ver = f"v{determine_mamba_version(mamba_exe)} [{mamba_exe}]"
+        mamba_ver = determine_mamba_version(mamba_exe)
+        mamba_state = "unsupported" if mamba_ver < MIN_MAMBA_VERSION else "ok"
+        mamba_ver = f"{mamba_ver} ({mamba_state}) [{mamba_exe}]"
     print(f"> Mamba:            {mamba_ver}")
 
-    micromamba_exe = safe_next(micromamba_executables()) or install_micromamba()
-    micromamba_ver = "n/a"
-    if micromamba_exe:
-        micromamba_ver = f"v{determine_micromamba_version(micromamba_exe)} [{micromamba_exe}]"
+    # Micromamba
+    micromamba_exe = safe_next(micromamba_executables())
+    micromamba_ver = determine_micromamba_version(micromamba_exe) if micromamba_exe else None
+    micromamba_state = "ok"
+    if not micromamba_ver or micromamba_ver < MIN_MAMBA_VERSION:
+        micromamba_exe = install_micromamba()
+        micromamba_ver = determine_micromamba_version(micromamba_exe) if micromamba_exe else None
+        micromamba_state = "unsupported" if micromamba_ver and micromamba_ver < MIN_MAMBA_VERSION else "ok"
+    micromamba_ver = f"{micromamba_ver} ({micromamba_state}) [{micromamba_exe}]" if micromamba_ver else "n/a"
     print(f"> Micromamba:       {micromamba_ver}")
 
+    # Conda
     conda_exe = safe_next(conda_executables())
     conda_ver = "n/a"
     if conda_exe:
-        conda_ver = f"v{determine_conda_version(conda_exe)} [{conda_exe}]"
+        conda_ver = determine_conda_version(conda_exe)
+        conda_state = "unsupported" if conda_ver < MIN_CONDA_VERSION else "ok"
+        conda_ver = f"{conda_ver} ({conda_state}) [{conda_exe}]"
     print(f"> Conda:            {conda_ver}")
 
+    # Conda standalone
     try:
-        condastandalone_exe = safe_next(conda_standalone_executables()) or install_conda_exe()
+        condastandalone_exe = safe_next(conda_standalone_executables())
+        condastandalone_ver = determine_conda_version(condastandalone_exe) if condastandalone_exe else None
+        condastandalone_state = "ok"
+        if not condastandalone_ver or condastandalone_ver < MIN_CONDA_VERSION:
+            condastandalone_exe = install_conda_exe()
+            condastandalone_ver = determine_conda_version(condastandalone_exe) if condastandalone_exe else None
+            condastandalone_state = "unsupported" if condastandalone_ver and condastandalone_ver < MIN_CONDA_VERSION else "ok"
+        condastandalone_ver = f"{condastandalone_ver} ({condastandalone_state}) [{condastandalone_exe}]" if condastandalone_ver else "n/a"
     except IndexError:
-        condastandalone_exe = None
-    condastandalone_ver = "n/a"
-    if condastandalone_exe:
-        condastandalone_ver = f"v{determine_conda_version(condastandalone_exe)} [{condastandalone_exe}]"
+        condastandalone_ver = "n/a"
     print(f"> Conda standalone: {condastandalone_ver}")
 
 
@@ -191,8 +258,7 @@ def init():
     """
     Initialize a new environment.yml
     """
-    environment_file = Path("environment.yml")
-    if environment_file.exists():
+    if env_file().exists():
         print("environment.yml already exists.")
         exit(1)
 
@@ -201,7 +267,7 @@ def init():
     pkg = repoquery_search(exe, "python", ["conda-forge"])
     spec = f"{pkg['name']} >={pkg['version']}"
 
-    with open(environment_file, "w") as f:
+    with open(env_file(), "w") as f:
         f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {platform_subdir()}\n\ndependencies:\n- {spec}\n")
 
     _lock()
@@ -211,14 +277,13 @@ def init():
 def _lock(platforms: List[str] = None):
     platforms = platforms or current_platforms()
 
-    lock_template = "conda-{platform}.lock"
-    lock_files = [lock_template.format(platform=p) for p in platforms]
-    for lock_file in glob("conda-*.lock"):
-        if lock_file not in lock_files:
-            os.remove(lock_file)
+    lock_files = [str(lock_file(p)) for p in platforms]
+    for filename in glob(str(lock_file("*"))):
+        if filename not in lock_files:
+            os.remove(filename)
 
     run_lock(
-        environment_files=[Path("environment.yml")],
+        environment_files=[env_file()],
         conda_exe=None,
         platforms=platforms or [platform_subdir()],
         mamba=True,
@@ -226,7 +291,7 @@ def _lock(platforms: List[str] = None):
         include_dev_dependencies=True,
         channel_overrides=None,
         kinds=["explicit"],
-        filename_template=lock_template,
+        filename_template=str(lock_file("{platform}")),
     )
 
 
@@ -239,18 +304,17 @@ def lock():
 
 
 def _install(prune: bool, lazy: bool = False, **kwargs):
-    from conda_lock.conda_lock import do_validate_platform
-
     exe = kwargs.get("exe", current_exe())
     prefix = kwargs.get("prefix", current_prefix(exe))
 
-    lock_file = Path(f"conda-{platform_subdir()}.lock")
-    if not lock_file.exists():
+    lock_filename = lock_file(platform_subdir())
+    if not lock_filename.exists():
         _lock()
-    with open(lock_file) as f:
+    with open(lock_filename) as f:
         lock_str = f.read()
 
-    do_validate_platform(lock_str)
+    if extract_platform(lock_str) != platform_subdir():
+        raise RuntimeError("Platform of lock file does not match current platform")
     env_hash = extract_env_hash(lock_str)
     if lazy and env_hash == current_env_hash(prefix):
         return
@@ -259,7 +323,7 @@ def _install(prune: bool, lazy: bool = False, **kwargs):
         str(exe),
         "create" if prune or not prefix.exists() else "update",
         "--file",
-        str(lock_file),
+        str(lock_filename),
         "--prefix",
         str(prefix),
         "--yes",
@@ -268,7 +332,7 @@ def _install(prune: bool, lazy: bool = False, **kwargs):
     if p.returncode != 0:
         print(p.stdout)
         print(p.stderr)
-        print(f"Could not perform conda install using {lock_file} lock file into {prefix}")
+        print(f"Could not install {lock_filename} into {prefix}")
         exit(1)
 
     save_env_hash(prefix, env_hash)
@@ -280,7 +344,6 @@ def install(prune: bool):
     """
     Install the environment based on the lock file
     """
-
     _install(prune)
 
 
@@ -306,29 +369,6 @@ def update(prune: bool):
     _install(prune)
 
 
-def load_env() -> Tuple[dict, Callable]:
-    import ruamel.yaml
-
-    environment_file = Path("environment.yml")
-    if not environment_file.exists():
-        raise FileNotFoundError(f"{environment_file} not found")
-
-    yaml = ruamel.yaml.YAML()
-    with open(environment_file) as f:
-        env = yaml.load(f)
-
-    if "channels" not in env:
-        env["channels"] = ["conda-forge"]
-    if "dependencies" not in env:
-        env["dependencies"] = ["python"]
-
-    def save_func():
-        with open(environment_file, "w") as f:
-            yaml.dump(env, f)
-
-    return env, save_func
-
-
 @cli.command()
 @click.argument("specs", nargs=-1)
 @click.option("--update/--no-update", default=True, is_flag=True)
@@ -337,7 +377,7 @@ def add(specs: List[str], update: bool, prune: bool):
     """
     Add a package to environment.yml, update the lock file(s) and install the environment
     """
-    env, save_func = load_env()
+    env, save_func = current_env_spec()
     exe = current_exe()
 
     dep_names = [spec.split(" ")[0] for spec in env["dependencies"]]
@@ -374,8 +414,7 @@ def remove(specs: List[str], update: bool, prune: bool):
     """
     Remove a package from environment.yml, update the lock file(s) and install the environment
     """
-    env, save_func = load_env()
-
+    env, save_func = current_env_spec()
     dep_names = [spec.split(" ")[0] for spec in env["dependencies"]]
 
     changed = False
