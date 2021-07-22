@@ -1,35 +1,37 @@
-from os import PathLike
-import os
-from typing import Callable, Iterator, List, Optional, Tuple
-import subprocess
 import json
+import os
+import re
+import subprocess
+import sys
+from glob import glob
 from hashlib import md5
 from pathlib import Path
-import sys
-import re
+from typing import Callable, Iterator, List, Optional, Tuple
 
 import click
-from conda_lock.conda_lock import determine_conda_executable
-from ensureconda.installer import install_conda_exe
-from ensureconda.resolve import conda_executables, micromamba_executables, platform_subdir
+from conda_lock.conda_lock import determine_conda_executable, run_lock
+from ensureconda.api import (determine_conda_version, determine_mamba_version, determine_micromamba_version)
+from ensureconda.installer import install_conda_exe, install_micromamba
+from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
+                                 micromamba_executables, platform_subdir)
 
 from ._version import __version__
 
 ENV_HASH_PATTERN = re.compile(r"^# env_hash: (.*)$")
 
 
-def safe_next(it: Iterator[PathLike]):
+def safe_next(it: Iterator[os.PathLike]):
     try:
         return next(it)
     except StopIteration:
         return None
 
 
-def is_mamba(exe: PathLike) -> bool:
+def is_mamba(exe: Path) -> bool:
     return str(exe).endswith("/mamba")
 
 
-def is_conda(exe: PathLike) -> bool:
+def is_conda(exe: Path) -> bool:
     return str(exe).endswith("/conda")
 
 
@@ -37,7 +39,7 @@ def current_exe():
     return Path(determine_conda_executable(None, mamba=True, micromamba=False))
 
 
-def current_envs_dir(exe: PathLike):
+def current_envs_dir(exe: Path):
     res = json.loads(subprocess.check_output([exe, "info", "--json"]))
     return Path(res["envs_dirs"][0])
 
@@ -49,7 +51,7 @@ def current_name():
     return f"{current_basename}-{hash}"
 
 
-def current_prefix(exe: PathLike):
+def current_prefix(exe: Path):
     envs_dir = current_envs_dir(exe)
     return envs_dir / current_name()
 
@@ -76,7 +78,7 @@ def current_platforms():
     return env.get("platforms", [platform_subdir()])
 
 
-def repoquery_search(exe: PathLike, spec: str, channels: List[str]):
+def repoquery_search(exe: Path, spec: str, channels: List[str]):
     args = []
     for c in channels:
         args.extend(["-c", c])
@@ -107,25 +109,39 @@ def info(name, prefix, platform):
     if platform:
         return print(platform_subdir())
 
-    from ensureconda.resolve import (mamba_executables, micromamba_executables, conda_executables,
-                                     conda_standalone_executables)
-    from ensureconda.api import (determine_mamba_version, determine_micromamba_version, determine_conda_version)
-    from ensureconda.installer import install_micromamba
-
     exe = current_exe()
-
     prefix = current_prefix(exe)
-    print("Current environment:")
-    print(f"> Prefix: {prefix} [{'ok' if prefix.exists() else 'not found'}]")
-    print(f"> Platform: {platform_subdir()}")
+    platform = platform_subdir()
 
-    print("\nPoco:")
+    print("Current environment")
+
+    env_file = Path("environment.yml")
+    lock_file = Path(f"conda-{platform}.lock")
+
+    env_status = "up-to-date"
+    if not env_file.exists():
+        env_status = "no environment.yml (run `poco init`)"
+    elif not lock_file.exists():
+        env_status = f"no lock file for this platform (run `poco lock`)"
+    elif not prefix.exists():
+        env_status = "not installed (run `poco install`)"
+    else:
+        with open(lock_file) as f:
+            lock_str = f.read()
+        if extract_env_hash(lock_str) != current_env_hash(prefix):
+            env_status = "outdated (run `poco install`)"
+
+    print(f"> Path:     {prefix}")
+    print(f"> Platform: {platform}")
+    print(f"> Status:   {env_status}")
+
+    print("\nPoco")
     print(f"> Version:  v{__version__}")
     py = sys.version_info
     print(f"> Python:   v{py.major}.{py.minor}.{py.micro}")
     print(f"> Envs dir: {current_envs_dir(exe)}")
 
-    print("\nConda:")
+    print("\nConda")
     mamba_exe = safe_next(mamba_executables())
     mamba_ver = "n/a"
     if mamba_exe:
@@ -162,9 +178,6 @@ def list(query: List[str]):
 
 
 def _lock(platforms: List[str] = None):
-    from conda_lock.conda_lock import run_lock
-    from glob import glob
-
     platforms = platforms or current_platforms()
 
     lock_template = "conda-{platform}.lock"
@@ -339,7 +352,7 @@ def shell(force_micromamba: bool):
     prefix = current_prefix(exe)
     _install(prune=False, lazy=True, exe=exe, prefix=prefix)
 
-    # shell only seems to work properly with conda and micromamba
+    # Currently only works with conda or micromamba
     if not force_micromamba:
         conda_exe = safe_next(conda_executables())
         if conda_exe:
@@ -359,7 +372,7 @@ def run(args):
     prefix = current_prefix(exe)
     _install(prune=False, lazy=True, exe=exe, prefix=prefix)
 
-    # Currently only works with regular conda executable
+    # Currently only works with conda
     if not is_conda(exe):
         exe = safe_next(conda_executables())
     if not exe:
@@ -367,6 +380,25 @@ def run(args):
         exit(1)
 
     subprocess.run([exe, "run", "--prefix", prefix, "--no-capture-out", "--live-stream", *args])
+
+
+@cli.command()
+def init():
+    environment_file = Path("environment.yml")
+    if environment_file.exists():
+        print("environment.yml already exists.")
+        exit(1)
+
+    exe = current_exe()
+
+    pkg = repoquery_search(exe, "python", ["conda-forge"])
+    spec = f"{pkg['name']} >={pkg['version']}"
+
+    with open(environment_file, "w") as f:
+        f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {platform_subdir()}\n\ndependencies:\n- {spec}\n")
+
+    _lock()
+    print(f"initialized environment.yml and conda-{platform_subdir()}.lock")
 
 
 if __name__ == "__main__":
