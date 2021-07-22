@@ -136,22 +136,22 @@ def info(name, prefix, platform):
 
     env_status = "up-to-date"
     if not env_file.exists():
-        env_status = "no environment.yml (run `poco init`)"
+        env_status = "no environment.yml (run `coma init`)"
     elif not lock_file.exists():
-        env_status = f"no lock file for this platform (run `poco lock`)"
+        env_status = f"no lock file for this platform (run `coma lock`)"
     elif not prefix.exists():
-        env_status = "not installed (run `poco install`)"
+        env_status = "not installed (run `coma install`)"
     else:
         with open(lock_file) as f:
             lock_str = f.read()
         if extract_env_hash(lock_str) != current_env_hash(prefix):
-            env_status = "outdated (run `poco install`)"
+            env_status = "outdated (run `coma install`)"
 
     print(f"> Path:     {prefix}")
     print(f"> Platform: {platform}")
     print(f"> Status:   {env_status}")
 
-    print("\nPoco")
+    print("\nComa")
     print(f"> Version:  v{__version__}")
     py = sys.version_info
     print(f"> Python:   v{py.major}.{py.minor}.{py.micro}")
@@ -421,7 +421,7 @@ def run(args):
     if not is_conda(exe):
         exe = safe_next(conda_executables())
     if not exe:
-        print("Poco run only works if regular conda is available on your system.")
+        print("Coma run only works if regular conda is available on your system.")
         exit(1)
 
     subprocess.run([exe, "run", "--prefix", prefix, "--no-capture-out", "--live-stream", *args])
@@ -431,7 +431,7 @@ def run(args):
 @click.option("--force-micromamba", default=False, is_flag=True)
 def shell(force_micromamba: bool):
     """
-    Activate the environment with `eval $(poco shell)`
+    Activate the environment with `eval $(coma shell)`
 
     Automatically installs the environment if it does not exist yet.
     """
