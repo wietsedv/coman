@@ -1,15 +1,15 @@
-# Coma: Conda Manager
+# CoMa: Conda Manager
 
 [![PyPI](https://img.shields.io/pypi/v/coma)](https://pypi.org/project/coma/)
 ![PyPI - License](https://img.shields.io/pypi/l/coma)
 
-A simple CLI for Conda dependency management. Coma gives you simple commands to manage dependencies in your `environment.yml` and properly uses lockfiles. Moreover, it manages unique Conda environments per project directory. Coma mimicks the workflow of [Poetry](https://github.com/python-poetry/poetry) (or any other modern dependency manager), but then for Conda.
+A simple CLI for Conda dependency management. CoMa gives you simple commands to manage dependencies in your `environment.yml` and properly uses lockfiles. Moreover, it manages unique Conda environments per project directory. CoMa mimicks the workflow of [Poetry](https://github.com/python-poetry/poetry) (or any other modern dependency manager), but then for Conda.
 
-**Warning:** Coma is work in progress and may not work in every scenario. 
+**Warning:** CoMa is work in progress and may not work in every scenario. 
 
-Coma is expected to work fully on Linux and macOS if a recent version of mamba is already available on your system. Otherwise you can currently only install (`coma install`) and activate (`coma shell`) environments. In other words: you can use Coma on a production system without any external dependencies.
+CoMa is expected to work fully on Linux and macOS if a recent version of mamba is already available on your system. Otherwise you can currently only install (`coma install`) and activate (`coma shell`) environments. In other words: you can use CoMa on a production system without any external dependencies.
 
-Coma manages:
+CoMa manages:
 
  - `environment.yml`:
    - `add`/`remove` dependencies with version constraints
@@ -19,7 +19,7 @@ Coma manages:
    - unique environments for your project in your default environments directory
 
 ## Installation
-There is currently no Coma conda recipe. Coma is designed to work independently of Conda, so that it can install and run Conda environments on any system (with micromamba).
+There is currently no CoMa conda recipe. CoMa is designed to work independently of Conda, so that it can install and run Conda environments on any system (with micromamba).
 
 ```bash
 pip install -U coma
