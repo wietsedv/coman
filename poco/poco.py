@@ -90,7 +90,20 @@ def repoquery_search(exe: Path, spec: str, channels: List[str]):
     return pkg
 
 
-@click.group()
+def extract_env_hash(lock_str: str) -> str:
+    for line in lock_str.strip().split("\n"):
+        m = ENV_HASH_PATTERN.search(line)
+        if m:
+            return m.group(1)
+    raise RuntimeError("Cannot find env_hash in lockfile")
+
+
+class NaturalOrderGroup(click.Group):
+    def list_commands(self, ctx):
+        return self.commands.keys()
+
+
+@click.group(cls=NaturalOrderGroup)
 @click.version_option()
 def cli():
     pass
@@ -101,6 +114,9 @@ def cli():
 @click.option("--prefix", default=False, is_flag=True)
 @click.option("--platform", default=False, is_flag=True)
 def info(name, prefix, platform):
+    """
+    Info about environment and current system
+    """
     if name:
         return print(current_name())
     if prefix:
@@ -171,10 +187,25 @@ def info(name, prefix, platform):
 
 
 @cli.command()
-@click.argument("query", nargs=-1)
-def list(query: List[str]):
+def init():
+    """
+    Initialize a new environment.yml
+    """
+    environment_file = Path("environment.yml")
+    if environment_file.exists():
+        print("environment.yml already exists.")
+        exit(1)
+
     exe = current_exe()
-    subprocess.run([exe, "list", "--prefix", current_prefix(exe), *query, "--quiet"])
+
+    pkg = repoquery_search(exe, "python", ["conda-forge"])
+    spec = f"{pkg['name']} >={pkg['version']}"
+
+    with open(environment_file, "w") as f:
+        f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {platform_subdir()}\n\ndependencies:\n- {spec}\n")
+
+    _lock()
+    print(f"initialized environment.yml and conda-{platform_subdir()}.lock")
 
 
 def _lock(platforms: List[str] = None):
@@ -199,12 +230,12 @@ def _lock(platforms: List[str] = None):
     )
 
 
-def extract_env_hash(lock: str) -> str:
-    for line in lock.strip().split("\n"):
-        m = ENV_HASH_PATTERN.search(line)
-        if m:
-            return m.group(1)
-    raise RuntimeError("Cannot find env_hash in lockfile")
+@cli.command()
+def lock():
+    """
+    Lock the package specifications
+    """
+    _lock()
 
 
 def _install(prune: bool, lazy: bool = False, **kwargs):
@@ -244,19 +275,33 @@ def _install(prune: bool, lazy: bool = False, **kwargs):
 
 
 @cli.command()
-def lock():
-    _lock()
+@click.option("--prune", default=False, is_flag=True)
+def install(prune: bool):
+    """
+    Install the environment based on the lock file
+    """
+
+    _install(prune)
 
 
 @cli.command()
-@click.option("--prune", default=False, is_flag=True)
-def install(prune: bool):
-    _install(prune)
+def uninstall():
+    """
+    Uninstall the environment
+
+    You must deactivate the environment before you can remove it.
+    """
+    exe = current_exe()
+    prefix = current_prefix(exe)
+    subprocess.run([exe, "env", "remove", "--prefix", prefix])
 
 
 @cli.command()
 @click.option("--prune", default=False, is_flag=True)
 def update(prune: bool):
+    """
+    Update the lock file(s) and install the new environment
+    """
     _lock()
     _install(prune)
 
@@ -289,6 +334,9 @@ def load_env() -> Tuple[dict, Callable]:
 @click.option("--update/--no-update", default=True, is_flag=True)
 @click.option("--prune", default=False, is_flag=True)
 def add(specs: List[str], update: bool, prune: bool):
+    """
+    Add a package to environment.yml, update the lock file(s) and install the environment
+    """
     env, save_func = load_env()
     exe = current_exe()
 
@@ -323,6 +371,9 @@ def add(specs: List[str], update: bool, prune: bool):
 @click.option("--update/--no-update", default=True, is_flag=True)
 @click.option("--prune", default=False, is_flag=True)
 def remove(specs: List[str], update: bool, prune: bool):
+    """
+    Remove a package from environment.yml, update the lock file(s) and install the environment
+    """
     env, save_func = load_env()
 
     dep_names = [spec.split(" ")[0] for spec in env["dependencies"]]
@@ -345,8 +396,45 @@ def remove(specs: List[str], update: bool, prune: bool):
 
 
 @cli.command()
+@click.argument("query", nargs=-1)
+def show(query: List[str]):
+    """
+    Show packages in the current environment
+    """
+    exe = current_exe()
+    subprocess.run([exe, "list", "--prefix", current_prefix(exe), *query, "--quiet"])
+
+
+@cli.command()
+@click.argument("args", nargs=-1)
+def run(args):
+    """
+    Run a command within the environment
+
+    Automatically installs the environment if it does not exist yet.
+    """
+    exe = current_exe()
+    prefix = current_prefix(exe)
+    _install(prune=False, lazy=True, exe=exe, prefix=prefix)
+
+    # Currently only works with conda
+    if not is_conda(exe):
+        exe = safe_next(conda_executables())
+    if not exe:
+        print("Poco run only works if regular conda is available on your system.")
+        exit(1)
+
+    subprocess.run([exe, "run", "--prefix", prefix, "--no-capture-out", "--live-stream", *args])
+
+
+@cli.command()
 @click.option("--force-micromamba", default=False, is_flag=True)
 def shell(force_micromamba: bool):
+    """
+    Activate the environment with `eval $(poco shell)`
+
+    Automatically installs the environment if it does not exist yet.
+    """
     shell = os.path.basename(os.environ["SHELL"])
     exe = current_exe()
     prefix = current_prefix(exe)
@@ -363,42 +451,6 @@ def shell(force_micromamba: bool):
     micromamba_exe = next(micromamba_executables())
     print(f"eval \"$('{micromamba_exe}' shell hook -s {shell})\";")
     print(f"micromamba activate \"{prefix}\"")
-
-
-@cli.command()
-@click.argument("args", nargs=-1)
-def run(args):
-    exe = current_exe()
-    prefix = current_prefix(exe)
-    _install(prune=False, lazy=True, exe=exe, prefix=prefix)
-
-    # Currently only works with conda
-    if not is_conda(exe):
-        exe = safe_next(conda_executables())
-    if not exe:
-        print("Poco run only works if regular conda is available on your system.")
-        exit(1)
-
-    subprocess.run([exe, "run", "--prefix", prefix, "--no-capture-out", "--live-stream", *args])
-
-
-@cli.command()
-def init():
-    environment_file = Path("environment.yml")
-    if environment_file.exists():
-        print("environment.yml already exists.")
-        exit(1)
-
-    exe = current_exe()
-
-    pkg = repoquery_search(exe, "python", ["conda-forge"])
-    spec = f"{pkg['name']} >={pkg['version']}"
-
-    with open(environment_file, "w") as f:
-        f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {platform_subdir()}\n\ndependencies:\n- {spec}\n")
-
-    _lock()
-    print(f"initialized environment.yml and conda-{platform_subdir()}.lock")
 
 
 if __name__ == "__main__":
