@@ -7,7 +7,7 @@ A simple CLI for Conda dependency management. CoMan gives you simple commands to
 
 **Warning:** CoMan is work in progress and may not work in every scenario. 
 
-CoMan is expected to work fully on Linux and macOS if a recent version of mamba is already available on your system. Otherwise you can currently only install (`coman install`) and activate (`coman shell`) environments. In other words: you can use CoMan on a production system without any external dependencies.
+CoMan does not require any external dependencies, but it is fastest if you install [Mamba](https://github.com/mamba-org/mamba) (see Caveats).
 
 CoMan manages:
 
@@ -19,13 +19,13 @@ CoMan manages:
    - unique environments for your project in your default environments directory
 
 ## Installation
-There is currently no CoMan conda recipe. CoMan is designed to work independently of Conda, so that it can install and run Conda environments on any system (with micromamba).
+There is currently no CoMan conda recipe. CoMan is designed to work independently of Conda, so that it can install and run Conda environments on any system (with Micromamba).
 
 ```bash
 pip install -U coman
 
 # pipx (recommended)
-# Make sure that pipx uses the python environment in which conda/mamba are installed (the conda base environment) if you want to be able to edit your environment.yml and lock files.
+# make sure that pipx uses the python environment in which conda/mamba are installed (the conda base environment) if you have those installed
 conda activate base
 pipx install -e --python python coman
 ```
@@ -68,3 +68,8 @@ cm run -- python --version
 # activate your environment in your current shell (at least works with bash and zsh)
 eval $(cm shell)
 ```
+
+## Caveats
+CoMan uses Mamba and Conda from your system if you have those installed. Otherwise, it will fall back to automatically installed Micromamba and Conda-standalone binaries. This means that you can use CoMan without any external dependencies, but CoMan will be fastest if you install Mamba.
+
+Moreover, you may experience problems with the `coman run` command if you do not have Conda on your system. You should then still be able to use `coman shell`.

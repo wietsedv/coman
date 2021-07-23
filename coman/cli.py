@@ -1,3 +1,4 @@
+import itertools
 import os
 import subprocess
 import sys
@@ -10,8 +11,8 @@ from ensureconda.resolve import (conda_executables, conda_standalone_executables
 
 from coman.env import change_spec, env_install, env_lock, env_uninstall
 from coman.spec import lock_env_hash, lock_file, spec_file
-from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, env_name, env_prefix, env_prefix_hash, envs_dir,
-                          repoquery_search, system_exe, system_platform)
+from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, conda_exe, env_name, env_prefix, env_prefix_hash,
+                          envs_dir, is_conda, pkg_search, system_exe, system_platform)
 
 from ._version import __version__
 
@@ -122,17 +123,17 @@ def init():
     Initialize a new environment.yml
     """
     if spec_file().exists():
-        print(f"{spec_file()} already exists.")
+        print(f"Specification file {spec_file()} already exists")
         exit(1)
 
-    pkg = repoquery_search("python", ["conda-forge"])
+    pkg = pkg_search("python", ["conda-forge"])
     pkg = f"{pkg['name']} >={pkg['version']}"
 
     with open(spec_file(), "w") as f:
         f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg}\n")
 
     env_lock()
-    print(f"initialized environment.yml and conda-{system_platform()}.lock")
+    print(f"\nInitialized environment.yml and conda-{system_platform()}.lock")
 
 
 @cli.command()
@@ -145,11 +146,12 @@ def lock():
 
 @cli.command()
 @click.option("--prune", default=False, is_flag=True)
-def install(prune: bool):
+@click.option("--lazy", default=False, is_flag=True)
+def install(prune: bool, lazy: bool):
     """
     Install the environment based on the lock file
     """
-    env_install(prune)
+    env_install(prune=prune, lazy=lazy)
 
 
 @cli.command()
@@ -164,12 +166,13 @@ def uninstall():
 
 @cli.command()
 @click.option("--prune", default=False, is_flag=True)
-def update(prune: bool):
+@click.option("--lazy", default=False, is_flag=True)
+def update(prune: bool, lazy: bool):
     """
     Update the lock file(s) and install the new environment
     """
     env_lock()
-    env_install(prune)
+    env_install(prune=prune, lazy=lazy)
 
 
 @cli.command()
@@ -211,7 +214,7 @@ def run(args):
     env_install(lazy=True)
 
     # Currently only works with conda
-    exe = next(conda_executables())
+    exe = conda_exe()
     subprocess.run([exe, "run", "--prefix", env_prefix(), "--no-capture-out", "--live-stream", *args])
 
 
@@ -229,16 +232,16 @@ def shell(force_micromamba: bool):
 
     # Currently only works with conda or micromamba
     if not force_micromamba:
-        conda_exe = safe_next(conda_executables())
-        if conda_exe:
-            print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
-            print(f"eval \"$('{conda_exe}' shell.{shell} hook)\";")
+        exe = conda_exe()
+        if exe:
+            print("\nYou can deactivate the environment with `conda deactivate`\n", file=sys.stderr)
+            print(f"eval \"$('{exe}' shell.{shell} hook)\";")
             print(f"conda activate \"{env_prefix()}\"")
-            return
+            exit(0)
 
-    micromamba_exe = next(micromamba_executables())
+    exe = next(micromamba_executables())
     print("\nYou can deactivate the environment with `micromamba deactivate`\n", file=sys.stderr)
-    print(f"eval \"$('{micromamba_exe}' shell hook -s {shell})\";")
+    print(f"eval \"$('{exe}' shell hook -s {shell})\";")
     print(f"micromamba activate \"{env_prefix()}\"")
 
 
