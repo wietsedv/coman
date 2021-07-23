@@ -231,11 +231,13 @@ def shell(force_micromamba: bool):
     if not force_micromamba:
         conda_exe = safe_next(conda_executables())
         if conda_exe:
+            print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
             print(f"eval \"$('{conda_exe}' shell.{shell} hook)\";")
             print(f"conda activate \"{env_prefix()}\"")
             return
 
     micromamba_exe = next(micromamba_executables())
+    print("\nYou can deactivate the environment with `micromamba deactivate`\n", file=sys.stderr)
     print(f"eval \"$('{micromamba_exe}' shell hook -s {shell})\";")
     print(f"micromamba activate \"{env_prefix()}\"")
 

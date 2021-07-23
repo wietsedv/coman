@@ -1,5 +1,6 @@
 import os
 from glob import glob
+import sys
 from typing import List
 
 from conda_lock.conda_lock import create_lockfile_from_spec
@@ -17,7 +18,7 @@ def env_lock():
             os.remove(lock_path)
 
     for platform in platforms:
-        print(f"Generating lock file for {platform}")
+        print(f"Generating lock file for {platform}", file=sys.stderr)
         lock_spec = parse_environment_file(spec_file(), platform)
         lock_contents = create_lockfile_from_spec(
             channels=lock_spec.channels,
@@ -43,6 +44,7 @@ def env_install(prune: bool = False, lazy: bool = False):
     if lazy and new_env_hash == env_prefix_hash(prefix):
         return
 
+    print(f"Installing environment to {prefix}", file=sys.stderr)
     args = [
         "create" if prune or not prefix.exists() else "update",
         "--file",
@@ -83,19 +85,19 @@ def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = []):
 
         spec_data["dependencies"].insert(i, pkg)
         dep_names.insert(i, name)
-        print(f"Added '{pkg}'")
+        print(f"Added '{pkg}' to spec", file=sys.stderr)
         changed = True
 
     # Remove
     for pkg in remove_pkgs:
         if pkg not in dep_names:
-            print(f"Dependency {pkg} not found")
+            print(f"Dependency {pkg} not found", file=sys.stderr)
             continue
 
         i = dep_names.index(pkg)
         pkg = spec_data["dependencies"].pop(i)
         dep_names.pop(i)
-        print(f"Removed '{pkg}'")
+        print(f"Removed '{pkg}' from spec", file=sys.stderr)
         changed = True
 
     # Update

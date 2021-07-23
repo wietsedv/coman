@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 from distutils.version import LooseVersion
 from hashlib import md5
 from os import PathLike
@@ -83,9 +84,11 @@ def system_exe() -> Path:
 
 def run_exe(args: List[Any]):
     args = [str(a) for a in [system_exe(), *args]]
-    p = subprocess.run(args, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
     if p.returncode != 0:
-        print(p.stderr)
+        if p.stdout:
+            print(p.stdout.strip(), file=sys.stderr)
+        print(p.stderr.strip(), file=sys.stderr)
     return p.stdout
 
 
