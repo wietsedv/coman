@@ -8,10 +8,10 @@ import click
 from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
                                  micromamba_executables, safe_next)
 
-from coma.env import change_spec, env_install, env_lock, env_uninstall
-from coma.spec import lock_env_hash, lock_file, spec_file
-from coma.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, env_name, env_prefix, env_prefix_hash, envs_dir,
-                         repoquery_search, system_exe, system_platform)
+from coman.env import change_spec, env_install, env_lock, env_uninstall
+from coman.spec import lock_env_hash, lock_file, spec_file
+from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, env_name, env_prefix, env_prefix_hash, envs_dir,
+                          repoquery_search, system_exe, system_platform)
 
 from ._version import __version__
 
@@ -51,20 +51,20 @@ def info(name: bool, prefix: bool, platform: bool):
     print("Current environment")
     sys_status = "up-to-date"
     if not spec_file().exists():
-        sys_status = "no environment.yml (run `coma init`)"
+        sys_status = "no environment.yml (run `coman init`)"
     elif not lock_file(sys_platform).exists():
-        sys_status = f"no lock file for this platform (run `coma lock`)"
+        sys_status = f"no lock file for this platform (run `coman lock`)"
     elif not sys_prefix.exists():
-        sys_status = "not installed (run `coma install`)"
+        sys_status = "not installed (run `coman install`)"
     else:
         if lock_env_hash(lock_file(sys_platform)) != env_prefix_hash(sys_prefix):
-            sys_status = "outdated (run `coma install`)"
+            sys_status = "outdated (run `coman install`)"
 
     print(f"> Path:     {sys_prefix}")
     print(f"> Platform: {sys_platform}")
     print(f"> Status:   {sys_status}")
 
-    print("\nCoMa")
+    print("\nCoMan")
     print(f"> Version:  {__version__}")
     py = sys.version_info
     print(f"> Python:   {py.major}.{py.minor}.{py.micro}")
@@ -219,7 +219,7 @@ def run(args):
 @click.option("--force-micromamba", default=False, is_flag=True)
 def shell(force_micromamba: bool):
     """
-    Activate the environment with `eval $(coma shell)`
+    Activate the environment with `eval $(coman shell)`
 
     Automatically installs the environment if it does not exist yet.
     """

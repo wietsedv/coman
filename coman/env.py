@@ -5,8 +5,8 @@ from typing import List
 from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser.environment_yaml import parse_environment_file
 
-from coma.spec import edit_spec_file, lock_env_hash, lock_file, spec_file, spec_platforms
-from coma.system import env_prefix, env_prefix_hash, repoquery_search, run_exe, system_exe, system_platform
+from coman.spec import edit_spec_file, lock_env_hash, lock_file, spec_file, spec_platforms
+from coman.system import env_prefix, env_prefix_hash, repoquery_search, run_exe, system_exe, system_platform
 
 
 def env_lock():
