@@ -117,5 +117,5 @@ def pkg_search(pkg: str, channels: List[str]):
         print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}")
         exit(1)
 
-    pkg_ = max(res[pkg], key=lambda p: p["timestamp"])
+    pkg_ = max(res[pkg], key=lambda p: p.get("timestamp", 0))
     return pkg_
