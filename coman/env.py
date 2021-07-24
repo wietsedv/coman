@@ -53,8 +53,10 @@ def env_install(prune: bool = False, force: bool = False):
         prefix,
         "--yes",
     ]
+    print(' '.join(map(str, args)))
     if not run_exe(args):
-        raise RuntimeError(f"\nCould not install {lock_path} into {prefix}")
+        print(f"\nCould not install {lock_path} into {prefix}")
+        exit(1)
 
     with open(prefix / "env_hash.txt", "w") as f:
         f.write(new_env_hash)

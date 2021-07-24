@@ -20,23 +20,29 @@ _envs_dir = None
 _env_name = None
 
 
-def system_exe(mamba: bool = True, conda: bool = True) -> Path:
+def system_exe(mamba: bool = None, micromamba: bool = None, conda: bool = None) -> Path:
     global _exe
 
-    if not (mamba or conda):
-        mamba = conda = True
-    if not _exe:
-        e = ensureconda(
-            mamba=mamba,
-            micromamba=False,
-            conda=conda,
-            conda_exe=conda,
-            min_mamba_version=MIN_MAMBA_VERSION,
-            min_conda_version=MIN_CONDA_VERSION,
-        )
-        if not e:
-            raise RuntimeError("No valid conda installation was found")
-        _exe = Path(e)
+    if _exe:
+        assert mamba is None and micromamba is None and conda is None
+        return _exe
+
+    if mamba or micromamba or conda:
+        assert mamba is not None and micromamba is not None and conda is not None
+    else:
+        mamba, micromamba, conda = True, False, True
+
+    e = ensureconda(
+        mamba=mamba,
+        micromamba=micromamba,
+        conda=conda,
+        conda_exe=conda,
+        min_mamba_version=MIN_MAMBA_VERSION,
+        min_conda_version=MIN_CONDA_VERSION,
+    )
+    if not e:
+        raise RuntimeError("No valid conda installation was found")
+    _exe = Path(e)
     return _exe
 
 
@@ -60,6 +66,7 @@ def run_exe(args: List[Any], check=True):
         if p.stdout:
             print(p.stdout.strip(), file=sys.stderr)
         print(p.stderr.strip(), file=sys.stderr)
+        return
     return p.stdout
 
 
@@ -78,7 +85,11 @@ def envs_dir():
         _envs_dir = Path(conda_prefix) / "envs"
         return _envs_dir
 
-    res = json.loads(run_exe(["info", "--json"]))
+    out = run_exe(["info", "--json"])
+    if not out:
+        print("Unable to resolve environments directory", file=sys.stderr)
+        exit(1)
+    res = json.loads(out)
     _envs_dir = Path(res["envs_dirs"][0])
 
     return _envs_dir
@@ -110,8 +121,9 @@ def is_mamba(exe: Path) -> bool:
     return exe.name == "mamba"
 
 
-def is_micromamba(exe: Path) -> bool:
-    return exe.name == "micromamba"
+def is_micromamba(exe: Optional[Path] = None) -> bool:
+    exe = exe or _exe
+    return exe is not None and exe.name == "micromamba"
 
 
 def is_conda(exe: Path, standalone: bool = True) -> bool:
@@ -129,13 +141,17 @@ def pkg_search(pkg: str, channels: List[str]):
     for c in channels:
         args.extend(["-c", c])
 
-    res = json.loads(run_exe(["search", pkg, *args, "--json"], check=False))
+    out = run_exe(["search", pkg, *args, "--json"], check=False)
+    if not out:
+        print(f"Unable to query package through '{system_exe()}'", file=sys.stderr)
+        exit(1)
+    res = json.loads(out)
     if "error" in res:
         print(res["error"], file=sys.stderr)
         exit(1)
 
     if pkg not in res:
-        print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}")
+        print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}", file=sys.stderr)
         exit(1)
 
     pkg_ = max(res[pkg], key=lambda p: p.get("timestamp", 0))

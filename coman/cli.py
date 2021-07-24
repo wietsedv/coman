@@ -11,7 +11,7 @@ from ensureconda.resolve import (conda_executables, conda_standalone_executables
 from coman.env import change_spec, env_install, env_lock, env_uninstall
 from coman.spec import lock_env_hash, lock_file, spec_file
 from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, conda_exe, env_name, env_prefix, env_prefix_hash,
-                          envs_dir, pkg_search, system_exe, system_platform)
+                          envs_dir, is_micromamba, pkg_search, system_exe, system_platform)
 
 from ._version import __version__
 
@@ -23,11 +23,12 @@ class NaturalOrderGroup(click.Group):
 
 @click.group(cls=NaturalOrderGroup)
 @click.option('--mamba', default=False, is_flag=True)
+@click.option('--micromamba', default=False, is_flag=True)
 @click.option('--conda', default=False, is_flag=True)
 @click.version_option()
-def cli(mamba: bool, conda: bool):
-    if mamba or conda:
-        system_exe(mamba, conda)
+def cli(mamba: bool, micromamba: bool, conda: bool):
+    if mamba or micromamba or conda:
+        system_exe(mamba, micromamba, conda)
 
 
 @cli.command()
@@ -128,7 +129,7 @@ def init():
     Initialize a new environment.yml
     """
     if spec_file().exists():
-        print(f"Specification file {spec_file()} already exists")
+        print(f"Specification file {spec_file()} already exists", file=sys.stderr)
         exit(1)
 
     pkg = pkg_search("python", ["conda-forge"])
@@ -241,16 +242,16 @@ def shell(force_micromamba: bool):
     shell = Path(os.environ["SHELL"]).name
 
     # Currently only works with conda or micromamba
-    if not force_micromamba:
+    if not force_micromamba and not is_micromamba():
         exe = conda_exe(standalone=False)
         if exe:
-            print("\nYou can deactivate the environment with `conda deactivate`\n", file=sys.stderr)
+            print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
             print(f"eval \"$('{exe}' shell.{shell} hook)\";")
             print(f"conda activate \"{env_prefix()}\"")
             exit(0)
 
     exe = next(micromamba_executables())
-    print("\nYou can deactivate the environment with `micromamba deactivate`\n", file=sys.stderr)
+    print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
     print(f"eval \"$('{exe}' shell hook -s {shell})\";")
     print(f"micromamba activate \"{env_prefix()}\"")
 
