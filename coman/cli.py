@@ -145,13 +145,13 @@ def lock():
 
 
 @cli.command()
-@click.option("--prune", default=False, is_flag=True)
-@click.option("--lazy", default=False, is_flag=True)
-def install(prune: bool, lazy: bool):
+@click.option("--prune/--no-prune", default=False)
+@click.option("--force/--no-force", default=False)
+def install(prune: bool, force: bool):
     """
     Install the environment based on the lock file
     """
-    env_install(prune=prune, lazy=lazy)
+    env_install(prune=prune, force=force)
 
 
 @cli.command()
@@ -165,32 +165,34 @@ def uninstall():
 
 
 @cli.command()
-@click.option("--prune", default=False, is_flag=True)
-@click.option("--lazy", default=False, is_flag=True)
-def update(prune: bool, lazy: bool):
+@click.option("--prune/--no-prune", default=False)
+@click.option("--force/--no-force", default=False)
+def update(prune: bool, force: bool):
     """
     Update the lock file(s) and install the new environment
     """
     env_lock()
-    env_install(prune=prune, lazy=lazy)
+    env_install(prune=prune, force=force)
 
 
 @cli.command()
 @click.argument("pkgs", nargs=-1)
-def add(pkgs: List[str]):
+@click.option("--prune/--no-prune", default=False)
+def add(pkgs: List[str], prune: bool):
     """
     Add a package to environment.yml, update the lock file(s) and install the environment
     """
-    change_spec(add_pkgs=pkgs)
+    change_spec(add_pkgs=pkgs, prune=prune)
 
 
 @cli.command()
 @click.argument("pkgs", nargs=-1)
-def remove(pkgs: List[str]):
+@click.option("--prune/--no-prune", default=False)
+def remove(pkgs: List[str], prune: bool):
     """
     Remove a package from environment.yml, update the lock file(s) and install the environment
     """
-    change_spec(remove_pkgs=pkgs)
+    change_spec(remove_pkgs=pkgs, prune=prune)
 
 
 @cli.command()
@@ -211,7 +213,7 @@ def run(args):
 
     Automatically installs the environment if it does not exist yet.
     """
-    env_install(lazy=True)
+    env_install()
 
     # Currently only works with conda
     exe = conda_exe()
@@ -226,7 +228,7 @@ def shell(force_micromamba: bool):
 
     Automatically installs the environment if it does not exist yet.
     """
-    env_install(lazy=True)
+    env_install()
 
     shell = Path(os.environ["SHELL"]).name
 

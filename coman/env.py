@@ -30,7 +30,7 @@ def env_lock():
             f.write("\n".join(lock_contents) + "\n")
 
 
-def env_install(prune: bool = False, lazy: bool = False):
+def env_install(prune: bool = False, force: bool = False):
     sys_platform = system_platform()
     lock_path = lock_file(sys_platform)
     if not lock_path.exists():
@@ -41,7 +41,7 @@ def env_install(prune: bool = False, lazy: bool = False):
 
     prefix = env_prefix()
     new_env_hash = lock_env_hash(lock_path)
-    if lazy and new_env_hash == env_prefix_hash(prefix):
+    if not prune and not force and new_env_hash == env_prefix_hash(prefix):
         return
 
     print(f"Installing environment to {prefix}", file=sys.stderr)
@@ -64,7 +64,7 @@ def env_uninstall():
     run_exe(["env", "remove", "--prefix", env_prefix()])
 
 
-def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = []):
+def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = [], prune: bool = False):
     spec_data, save_spec_file = edit_spec_file()
 
     dep_names = [spec.split(" ")[0] for spec in spec_data["dependencies"]]
@@ -104,5 +104,6 @@ def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = []):
     if changed:
         save_spec_file()
         env_lock()
-        if env_prefix().exists():
-            env_install(lazy=True)
+
+    if (changed or prune) and env_prefix().exists():
+        env_install(prune=prune, force=False)
