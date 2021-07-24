@@ -6,11 +6,12 @@ from typing import List
 from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser.environment_yaml import parse_environment_file
 
-from coman.spec import (edit_spec_file, lock_env_hash, lock_file, spec_file, spec_platforms)
+from coman.spec import (edit_spec_file, lock_env_hash, lock_file, require_spec_file, spec_file, spec_platforms)
 from coman.system import (env_prefix, env_prefix_hash, pkg_search, run_exe, system_exe, system_platform)
 
 
 def env_lock():
+    require_spec_file()
     platforms = spec_platforms() or [system_platform()]
     new_lock_paths = [str(lock_file(p)) for p in platforms]
     for lock_path in glob(str(lock_file("*"))):
@@ -31,12 +32,14 @@ def env_lock():
 
 
 def env_install(prune: bool = False, force: bool = False):
+    require_spec_file()
     sys_platform = system_platform()
     lock_path = lock_file(sys_platform)
     if not lock_path.exists():
         platforms = spec_platforms()
         if platforms and sys_platform not in platforms:
-            raise RuntimeError(f"platform {sys_platform} is not available")
+            print(f"Platform {sys_platform} is not enabled in {spec_file()}", file=sys.stderr)
+            exit(1)
         env_lock()
 
     prefix = env_prefix()
@@ -67,6 +70,7 @@ def env_uninstall():
 
 
 def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = [], prune: bool = False):
+    require_spec_file()
     spec_data, save_spec_file = edit_spec_file()
 
     dep_names = [spec.split(" ")[0] for spec in spec_data["dependencies"]]

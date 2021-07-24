@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+import sys
 from typing import Callable, List, Optional, Tuple
 
 import ruamel.yaml as yaml
@@ -10,6 +11,13 @@ PLATFORM_PATTERN = re.compile(r"^# platform: (.*)$")
 
 def spec_file():
     return Path("environment.yml")
+
+
+def require_spec_file():
+    if not spec_file().exists():
+        print(f"Specification file `{spec_file()}` is not found in the current directory. Create it with `coman init`",
+              file=sys.stderr)
+        exit(1)
 
 
 def spec_platforms() -> Optional[List[str]]:

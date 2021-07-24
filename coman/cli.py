@@ -129,9 +129,10 @@ def init():
     Initialize a new environment.yml
     """
     if spec_file().exists():
-        print(f"Specification file {spec_file()} already exists", file=sys.stderr)
+        print(f"Specification file `{spec_file()}` already exists", file=sys.stderr)
         exit(1)
 
+    print("Creating `environment.yml`")
     pkg = pkg_search("python", ["conda-forge"])
     pkg = f"{pkg['name']} >={pkg['version']}"
 
@@ -139,7 +140,6 @@ def init():
         f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg}\n")
 
     env_lock()
-    print(f"\nInitialized environment.yml and conda-{system_platform()}.lock")
 
 
 @cli.command()
