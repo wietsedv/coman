@@ -1,4 +1,3 @@
-import itertools
 import os
 import subprocess
 import sys
@@ -12,7 +11,7 @@ from ensureconda.resolve import (conda_executables, conda_standalone_executables
 from coman.env import change_spec, env_install, env_lock, env_uninstall
 from coman.spec import lock_env_hash, lock_file, spec_file
 from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, conda_exe, env_name, env_prefix, env_prefix_hash,
-                          envs_dir, is_conda, pkg_search, system_exe, system_platform)
+                          envs_dir, pkg_search, system_exe, system_platform)
 
 from ._version import __version__
 
@@ -23,16 +22,20 @@ class NaturalOrderGroup(click.Group):
 
 
 @click.group(cls=NaturalOrderGroup)
+@click.option('--mamba', default=False, is_flag=True)
+@click.option('--conda', default=False, is_flag=True)
 @click.version_option()
-def cli():
-    pass
+def cli(mamba: bool, conda: bool):
+    if mamba or conda:
+        system_exe(mamba, conda)
 
 
 @cli.command()
 @click.option("--name", default=False, is_flag=True)
 @click.option("--prefix", default=False, is_flag=True)
 @click.option("--platform", default=False, is_flag=True)
-def info(name: bool, prefix: bool, platform: bool):
+@click.option("--exe", default=False, is_flag=True)
+def info(name: bool, prefix: bool, platform: bool, exe: bool):
     """
     Info about environment and current system
     """
@@ -45,6 +48,8 @@ def info(name: bool, prefix: bool, platform: bool):
         return print(env_prefix())
     if platform:
         return print(system_platform())
+    if exe:
+        return print(system_exe())
 
     sys_prefix = env_prefix()
     sys_platform = system_platform()

@@ -15,31 +15,35 @@ from ensureconda.resolve import conda_executables, conda_standalone_executables,
 MIN_CONDA_VERSION = LooseVersion("4.9")
 MIN_MAMBA_VERSION = LooseVersion("0.15")
 
-_exe: Optional[PathLike] = None
+_exe: Optional[Path] = None
 _envs_dir = None
 _env_name = None
 
 
-def system_exe() -> Path:
+def system_exe(mamba: bool = True, conda: bool = True) -> Path:
     global _exe
+
+    if not (mamba or conda):
+        mamba = conda = True
     if not _exe:
-        _exe = ensureconda(
-            mamba=True,
+        e = ensureconda(
+            mamba=mamba,
             micromamba=False,
-            conda=True,
-            conda_exe=True,
+            conda=conda,
+            conda_exe=conda,
             min_mamba_version=MIN_MAMBA_VERSION,
             min_conda_version=MIN_CONDA_VERSION,
         )
-        if not _exe:
+        if not e:
             raise RuntimeError("No valid conda installation was found")
-    return Path(_exe)
+        _exe = Path(e)
+    return _exe
 
 
 def conda_exe():
-    exe = system_exe()
-    if is_conda(exe):
-        return exe
+    global _exe
+    if _exe and is_conda(Path(_exe)):
+        return _exe
     exe = safe_next(itertools.chain(conda_executables(), conda_standalone_executables()))
     if exe:
         return Path(exe)
@@ -60,8 +64,20 @@ def envs_dir():
     global _envs_dir
     if _envs_dir:
         return _envs_dir
+
+    root = os.getenv("COMAN_ENVS_ROOT")
+    if root:
+        _envs_dir = Path(root)
+        return _envs_dir
+
+    conda_prefix = os.getenv("MAMBA_ROOT_PREFIX", os.getenv("CONDA_PREFIX"))
+    if conda_prefix:
+        _envs_dir = Path(conda_prefix) / "envs"
+        return _envs_dir
+
     res = json.loads(run_exe(["info", "--json"]))
     _envs_dir = Path(res["envs_dirs"][0])
+
     return _envs_dir
 
 

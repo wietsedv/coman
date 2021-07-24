@@ -15,8 +15,13 @@ CoMan manages:
    - `add`/`remove` dependencies with version constraints
  - `conda-{platform}.lock`:
    - (multi-platform) lock files for reproducable environments
- - `{envs_dir}/{basename}-{hash}`:
+ - `{COMAN_ENVS_ROOT}/{basename}-{hash}`:
    - unique environments for your project in your default environments directory
+   - CoMan checks the following environment variables (in order):
+     - `{COMAN_ENVS_ROOT}`
+     - `{MAMBA_ROOT_PREFIX}/envs`
+     - `{CONDA_PREFIX}/envs`
+     - Fallback: `conda info` (relatively slow)
 
 ## Installation
 There is currently no CoMan conda recipe. CoMan is designed to work independently of Conda, so that it can install and run Conda environments on any system (with Micromamba).
