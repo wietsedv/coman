@@ -221,7 +221,10 @@ def run(args):
     env_install()
 
     # Currently only works with conda
-    exe = conda_exe()
+    exe = conda_exe(standalone=False)
+    if not exe:
+        print("This command requires a Conda installation", file=sys.stderr)
+        exit(1)
     subprocess.run([exe, "run", "--prefix", env_prefix(), "--no-capture-out", "--live-stream", *args])
 
 
@@ -239,7 +242,7 @@ def shell(force_micromamba: bool):
 
     # Currently only works with conda or micromamba
     if not force_micromamba:
-        exe = conda_exe()
+        exe = conda_exe(standalone=False)
         if exe:
             print("\nYou can deactivate the environment with `conda deactivate`\n", file=sys.stderr)
             print(f"eval \"$('{exe}' shell.{shell} hook)\";")

@@ -40,14 +40,17 @@ def system_exe(mamba: bool = True, conda: bool = True) -> Path:
     return _exe
 
 
-def conda_exe():
+def conda_exe(standalone: bool = True):
     global _exe
-    if _exe and is_conda(Path(_exe)):
+    if _exe and is_conda(Path(_exe), standalone=standalone):
         return _exe
-    exe = safe_next(itertools.chain(conda_executables(), conda_standalone_executables()))
+
+    conda_iter = conda_executables()
+    if standalone:
+        conda_iter = itertools.chain(conda_iter, conda_standalone_executables())
+    exe = safe_next(conda_iter)
     if exe:
         return Path(exe)
-    raise RuntimeError("No conda executable found")
 
 
 def run_exe(args: List[Any], check=True):
@@ -111,8 +114,10 @@ def is_micromamba(exe: Path) -> bool:
     return exe.name == "micromamba"
 
 
-def is_conda(exe: Path) -> bool:
-    return exe.name in ["conda", "conda_standalone"]
+def is_conda(exe: Path, standalone: bool = True) -> bool:
+    if standalone:
+        return exe.name in ["conda", "conda_standalone"]
+    return exe.name == "conda"
 
 
 def system_platform():
