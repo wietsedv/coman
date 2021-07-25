@@ -8,7 +8,7 @@ import click
 from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
                                  micromamba_executables, safe_next)
 
-from coman.env import change_spec, env_install, env_lock, env_python_exe, env_python_version, env_uninstall
+from coman.env import change_spec, env_install, env_lock, env_python_exe, env_python_version, env_show, env_uninstall
 from coman.spec import conda_lock_file, conda_outdated, pip_outdated, spec_file
 from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, conda_exe, env_name, env_prefix, envs_dir,
                           is_micromamba, conda_search, system_exe, system_platform)
@@ -216,8 +216,7 @@ def show(query: List[str]):
     """
     Show packages in the current environment
     """
-    exe = system_exe()
-    subprocess.run([exe, "list", "--prefix", env_prefix(), *query, "--quiet"])
+    env_show(query)
 
 
 @cli.command()

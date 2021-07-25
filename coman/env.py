@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from distutils.version import LooseVersion
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -8,6 +9,7 @@ import subprocess
 import sys
 from glob import glob
 from typing import Iterator, List, Optional
+import click
 
 import ruamel.yaml as yaml
 
@@ -15,7 +17,8 @@ from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser import LockSpecification
 
 from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_file, pip_lock_hash,
-                        pip_outdated, require_spec_file, spec_file, spec_pip_requirements, spec_platforms)
+                        pip_outdated, require_spec_file, spec_file, spec_package_names, spec_pip_requirements,
+                        spec_platforms)
 from coman.system import (env_prefix, conda_search, pypi_search, run_exe, system_exe)
 
 
@@ -285,3 +288,35 @@ def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = [], prune: Op
 
     if (changed or prune) and env_prefix().exists():
         env_install(prune=prune, force=False)
+
+
+def env_show(query: List[str]):
+    out = run_exe(["list", "--prefix", env_prefix(), *query, "--json"])
+    if not out:
+        print("No results", file=sys.stderr)
+        exit(1)
+    res = json.loads(out)
+
+    conda_names, pip_names = spec_package_names()
+    for pkg_info in res:
+        name, version, channel = pkg_info["name"], pkg_info["version"], pkg_info["channel"]
+
+        fg, warning = None, ""
+        if channel == "pypi":
+            if name in pip_names:
+                fg = "blue"
+            else:
+                warning = "WARNING: implicit pip dependency"
+            if name in conda_names:
+                warning = "WARNING: conda dependency overriden by pip"
+        else:
+            if name in conda_names:
+                fg = "green"
+
+        name_fmt = click.style(name.ljust(20), fg=fg, bold=True)
+        version_fmt = click.style(version.ljust(10), fg=fg)
+        channel_fmt = click.style(channel.ljust(14), fg="bright_black")
+        warning_str = click.style(warning.ljust(20), fg="yellow")
+
+        line = f"{name_fmt} {version_fmt} {channel_fmt} {warning_str}"
+        click.echo(line)

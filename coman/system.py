@@ -59,7 +59,7 @@ def conda_exe(standalone: bool = True):
         return Path(exe)
 
 
-def run_exe(args: List[Any], check=True):
+def run_exe(args: List[Any], check: bool = True):
     args = [str(a) for a in [system_exe(), *args]]
     p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
     if check and p.returncode != 0:

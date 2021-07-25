@@ -56,6 +56,20 @@ def spec_pip_requirements():
     return None
 
 
+def spec_package_names() -> Tuple[List[str], List[str]]:
+    with open(spec_file()) as f:
+        env = yaml.safe_load(f)
+
+    conda_names, pip_names = [], []
+    for pkg in env["dependencies"]:
+        if isinstance(pkg, str):
+            conda_names.append(pkg.split(" ")[0])
+        if isinstance(pkg, dict) and "pip" in pkg:
+            for pip_pkg in pkg["pip"]:
+                pip_names.append(pip_pkg.split(" ")[0])
+    return conda_names, pip_names
+
+
 def conda_lock_file(platform: Optional[str] = None):
     platform = platform or system_platform()
     return Path(f"conda-{platform}.lock")
