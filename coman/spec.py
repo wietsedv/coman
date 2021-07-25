@@ -31,7 +31,7 @@ def spec_platforms() -> List[str]:
         env = yaml.safe_load(f)
     platforms = env.get("platforms", [sys_platform])
     if sys_platform not in platforms:
-        print("WARNING: You system platform ({})", file=sys.stderr)
+        print(f"WARNING: Platform {sys_platform} is not whitelisted in {spec_file()}", file=sys.stderr)
     return platforms
 
 

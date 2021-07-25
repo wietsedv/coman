@@ -3,16 +3,16 @@ from distutils.version import LooseVersion
 import hashlib
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from glob import glob
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 import ruamel.yaml as yaml
 
 from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser import LockSpecification
-from conda_lock.src_parser.selectors import filter_platform_selectors
 
 from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_file, pip_lock_hash,
                         pip_outdated, require_spec_file, spec_file, spec_pip_requirements, spec_platforms)
@@ -26,6 +26,30 @@ def env_python_exe():
 def env_python_version():
     vstring = subprocess.check_output([env_python_exe(), "--version"], encoding="utf-8").split(" ")[-1]
     return LooseVersion(vstring)
+
+
+def filter_platform_selectors(content: str, platform) -> Iterator[str]:
+    platform_sel = {
+        "linux-64": {"linux64", "unix", "linux"},
+        "linux-aarch64": {"aarch64", "unix", "linux"},
+        "linux-ppc64le": {"ppc64le", "unix", "linux"},
+        "osx-64": {"osx", "osx64", "unix"},
+        "osx-arm64": {"arm64", "osx", "unix"},
+        "win-64": {"win", "win64"},
+    }
+
+    # This code is adapted from conda-build
+    sel_pat = re.compile(r"(.+?)\s*(#.*)?\[([^\[\]]+)\](?(2)[^\(\)]*)$")
+    for line in content.splitlines(keepends=False):
+        if line.lstrip().startswith("#"):
+            continue
+        m = sel_pat.match(line)
+        if m:
+            cond = m.group(3)
+            if cond == platform or cond in platform_sel[platform]:
+                yield line
+        else:
+            yield line
 
 
 def parse_environment_file(spec_file: Path, platform: str) -> LockSpecification:
@@ -139,7 +163,7 @@ def _env_install_pip():
         "--no-deps",
         "--disable-pip-version-check",
         "--no-input",
-        # "--quiet",
+        "--quiet",
     ]
     res = subprocess.run(args)
     if res.returncode != 0:
@@ -221,7 +245,6 @@ def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = [], prune: Op
 
     def _remove_pkg(pkg: str):
         if pkg not in dep_names:
-            print(dep_names)
             print(f"Dependency {pkg} not found", file=sys.stderr)
             return False
 
