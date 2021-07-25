@@ -5,11 +5,11 @@
 https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2#d7c89558ba9fa0495403155b64376d81
 https://conda.anaconda.org/conda-forge/linux-64/ca-certificates-2021.5.30-ha878542_0.tar.bz2#6a777890e94194dc94a29a76d2a7e721
 https://conda.anaconda.org/conda-forge/linux-64/ld_impl_linux-64-2.36.1-hea4e1c9_1.tar.bz2#2ec77acdfe08d650005b190eadc71d05
-https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-11.1.0-h56837e0_0.tar.bz2#58e6dc162e5c9c62d7372795ffe3562c
+https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-ng-11.1.0-h56837e0_2.tar.bz2#ad0cb1e358b71c9016b5d67f501956f8
 https://conda.anaconda.org/conda-forge/noarch/tzdata-2021a-he74cb21_1.tar.bz2#cc5690eb258c3706f754306f191da8d8
-https://conda.anaconda.org/conda-forge/linux-64/libgomp-11.1.0-hc902ee8_0.tar.bz2#c52ff56922f3d8a7ee75857eccb1a281
+https://conda.anaconda.org/conda-forge/linux-64/libgomp-11.1.0-hc902ee8_2.tar.bz2#d6068dc139e4ed1705459873855ca37b
 https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-1_gnu.tar.bz2#561e277319a41d4f24f5c05a9ef63c04
-https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-11.1.0-hc902ee8_0.tar.bz2#8cef487db132e646c6baaa719c51c253
+https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-11.1.0-hc902ee8_2.tar.bz2#ed6007547173a4ae6b0e913ba70f0502
 https://conda.anaconda.org/conda-forge/linux-64/libffi-3.3-h58526e2_2.tar.bz2#665369991d8dd290ac5ee92fce3e6bf5
 https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.2-h58526e2_4.tar.bz2#509f2a21c4a09214cd737a480dfd80c9
 https://conda.anaconda.org/conda-forge/linux-64/openssl-1.1.1k-h7f98852_0.tar.bz2#07fae2cb088379c8441e0f3ffa1f4025
@@ -43,7 +43,7 @@ https://conda.anaconda.org/conda-forge/noarch/click-default-group-1.2.2-pyhd8ed1
 https://conda.anaconda.org/conda-forge/linux-64/cryptography-3.4.7-py39hbca0aa6_0.tar.bz2#04e97f7d5c60f75a36b1e4bdf3652ebd
 https://conda.anaconda.org/conda-forge/noarch/jinja2-3.0.1-pyhd8ed1ab_0.tar.bz2#c647e77921fd3e245cdcc5b2d451a0f8
 https://conda.anaconda.org/conda-forge/linux-64/setuptools-49.6.0-py39hf3d152e_3.tar.bz2#4397280abb201d7adff59099e12e7ddd
-https://conda.anaconda.org/conda-forge/noarch/pip-21.1.3-pyhd8ed1ab_0.tar.bz2#231bd0af116f55ca4d17ea0869415fdf
+https://conda.anaconda.org/conda-forge/noarch/pip-21.2.1-pyhd8ed1ab_0.tar.bz2#155f04d007b5676c917e8287f9aee3d2
 https://conda.anaconda.org/conda-forge/noarch/pyopenssl-20.0.1-pyhd8ed1ab_0.tar.bz2#92371c25994d0f5d28a01c1fb75ebf86
 https://conda.anaconda.org/conda-forge/linux-64/ruamel.yaml-0.17.10-py39h3811e60_0.tar.bz2#add249f18d9609f13756a8df625ae549
 https://conda.anaconda.org/conda-forge/noarch/urllib3-1.26.6-pyhd8ed1ab_0.tar.bz2#dea5b6d93cfbfbc2a253168ad05b3f89

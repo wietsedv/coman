@@ -2,16 +2,16 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import click
 from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
                                  micromamba_executables, safe_next)
 
-from coman.env import change_spec, env_install, env_lock, env_uninstall
-from coman.spec import lock_env_hash, lock_file, spec_file
-from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, conda_exe, env_name, env_prefix, env_prefix_hash,
-                          envs_dir, is_micromamba, pkg_search, system_exe, system_platform)
+from coman.env import change_spec, env_install, env_lock, env_python_exe, env_python_version, env_uninstall
+from coman.spec import conda_lock_file, conda_outdated, pip_outdated, spec_file
+from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, conda_exe, env_name, env_prefix, envs_dir,
+                          is_micromamba, conda_search, system_exe, system_platform)
 
 from ._version import __version__
 
@@ -36,7 +36,8 @@ def cli(mamba: bool, micromamba: bool, conda: bool):
 @click.option("--prefix", default=False, is_flag=True)
 @click.option("--platform", default=False, is_flag=True)
 @click.option("--exe", default=False, is_flag=True)
-def info(name: bool, prefix: bool, platform: bool, exe: bool):
+@click.option("--python", default=False, is_flag=True)
+def info(name: bool, prefix: bool, platform: bool, exe: bool, python: bool):
     """
     Info about environment and current system
     """
@@ -51,6 +52,8 @@ def info(name: bool, prefix: bool, platform: bool, exe: bool):
         return print(system_platform())
     if exe:
         return print(system_exe())
+    if python:
+        return print(env_python_exe())
 
     sys_prefix = env_prefix()
     sys_platform = system_platform()
@@ -59,17 +62,20 @@ def info(name: bool, prefix: bool, platform: bool, exe: bool):
     sys_status = "up-to-date"
     if not spec_file().exists():
         sys_status = "no environment.yml (run `coman init`)"
-    elif not lock_file(sys_platform).exists():
+    elif not conda_lock_file().exists():
         sys_status = f"no lock file for this platform (run `coman lock`)"
     elif not sys_prefix.exists():
         sys_status = "not installed (run `coman install`)"
-    else:
-        if lock_env_hash(lock_file(sys_platform)) != env_prefix_hash(sys_prefix):
-            sys_status = "outdated (run `coman install`)"
+    elif conda_outdated():
+        sys_status = "env outdated (run `coman install`)"
+    elif pip_outdated():
+        sys_status = "pip outdated (run `coman install`)"
 
-    print(f"> Path:     {sys_prefix}")
+    print(f"> Prefix:   {sys_prefix}")
     print(f"> Platform: {sys_platform}")
     print(f"> Status:   {sys_status}")
+    if sys_prefix.exists():
+        print(f"> Python:   {env_python_version()}")
 
     print("\nCoMan")
     print(f"> Version:  {__version__}")
@@ -133,7 +139,7 @@ def init():
         exit(1)
 
     print("Creating `environment.yml`")
-    pkg = pkg_search("python", ["conda-forge"])
+    pkg = conda_search("python", ["conda-forge"])
     pkg = f"{pkg['name']} >={pkg['version']}"
 
     with open(spec_file(), "w") as f:
@@ -151,16 +157,6 @@ def lock():
 
 
 @cli.command()
-@click.option("--prune/--no-prune", default=False)
-@click.option("--force/--no-force", default=False)
-def install(prune: bool, force: bool):
-    """
-    Install the environment based on the lock file
-    """
-    env_install(prune=prune, force=force)
-
-
-@cli.command()
 def uninstall():
     """
     Uninstall the environment
@@ -171,9 +167,19 @@ def uninstall():
 
 
 @cli.command()
-@click.option("--prune/--no-prune", default=False)
-@click.option("--force/--no-force", default=False)
-def update(prune: bool, force: bool):
+@click.option("--prune/--no-prune", default=None)
+@click.option("--force", default=False, is_flag=True)
+def install(prune: Optional[bool], force: bool):
+    """
+    Install the environment based on the lock file
+    """
+    env_install(prune=prune, force=force)
+
+
+@cli.command()
+@click.option("--prune/--no-prune", default=None)
+@click.option("--force", default=False, is_flag=True)
+def update(prune: Optional[bool], force: bool):
     """
     Update the lock file(s) and install the new environment
     """
@@ -183,22 +189,25 @@ def update(prune: bool, force: bool):
 
 @cli.command()
 @click.argument("pkgs", nargs=-1)
-@click.option("--prune/--no-prune", default=False)
-def add(pkgs: List[str], prune: bool):
+@click.option("--prune/--no-prune", default=None)
+@click.option("--pip", default=False, is_flag=True)
+def add(pkgs: List[str], prune: Optional[bool], pip: bool):
     """
     Add a package to environment.yml, update the lock file(s) and install the environment
     """
-    change_spec(add_pkgs=pkgs, prune=prune)
+    # TODO Add platform filters with i.e. "# [linux64]" filter_platform_selectors()
+    change_spec(add_pkgs=pkgs, prune=prune, pip=pip)
 
 
 @cli.command()
 @click.argument("pkgs", nargs=-1)
-@click.option("--prune/--no-prune", default=False)
-def remove(pkgs: List[str], prune: bool):
+@click.option("--prune/--no-prune", default=None)
+@click.option("--pip", default=False, is_flag=True)
+def remove(pkgs: List[str], prune: Optional[bool], pip: bool):
     """
     Remove a package from environment.yml, update the lock file(s) and install the environment
     """
-    change_spec(remove_pkgs=pkgs, prune=prune)
+    change_spec(remove_pkgs=pkgs, prune=prune, pip=pip)
 
 
 @cli.command()
@@ -230,8 +239,7 @@ def run(args):
 
 
 @cli.command()
-@click.option("--force-micromamba", default=False, is_flag=True)
-def shell(force_micromamba: bool):
+def shell():
     """
     Activate the environment with `eval $(coman shell)`
 
@@ -242,7 +250,7 @@ def shell(force_micromamba: bool):
     shell = Path(os.environ["SHELL"]).name
 
     # Currently only works with conda or micromamba
-    if not force_micromamba and not is_micromamba():
+    if not is_micromamba():
         exe = conda_exe(standalone=False)
         if exe:
             print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)

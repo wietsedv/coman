@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/coman)](https://pypi.org/project/coman/)
 ![PyPI - License](https://img.shields.io/pypi/l/coman)
 
-A simple CLI for Conda dependency management. CoMan gives you simple commands to manage dependencies in your `environment.yml` and properly uses lockfiles. Moreover, it manages unique Conda environments per project directory. CoMan mimicks the workflow of [Poetry](https://github.com/python-poetry/poetry) (or any other modern dependency manager), but then for Conda.
+A simple CLI for Conda dependency management. CoMan gives you simple commands to manage dependencies in your `environment.yml` and properly uses lock files. Moreover, it manages unique Conda environments per project directory. CoMan mimicks the workflow of [Poetry](https://github.com/python-poetry/poetry) (or any other modern dependency manager), but then for Conda.
 
 **Warning:** CoMan is work in progress and may not work in every scenario. 
 

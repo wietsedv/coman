@@ -110,8 +110,15 @@ def env_prefix():
     return envs_dir() / env_name()
 
 
-def env_prefix_hash(prefix: Path) -> Optional[str]:
-    env_hash_file = prefix / "env_hash.txt"
+def env_prefix_conda_hash() -> Optional[str]:
+    env_hash_file = env_prefix() / "conda_hash.txt"
+    if env_hash_file.exists():
+        with open(env_hash_file) as f:
+            return f.read().strip()
+
+
+def env_prefix_pip_hash() -> Optional[str]:
+    env_hash_file = env_prefix() / "pip_hash.txt"
     if env_hash_file.exists():
         with open(env_hash_file) as f:
             return f.read().strip()
@@ -136,7 +143,7 @@ def system_platform():
     return platform_subdir()
 
 
-def pkg_search(pkg: str, channels: List[str]):
+def conda_search(pkg: str, channels: List[str]):
     args = []
     for c in channels:
         args.extend(["-c", c])
@@ -156,3 +163,10 @@ def pkg_search(pkg: str, channels: List[str]):
 
     pkg_ = max(res[pkg], key=lambda p: p.get("timestamp", 0))
     return pkg_
+
+
+def pypi_search(pkg: str):
+    import urllib3
+    http = urllib3.PoolManager()
+    data = json.loads(http.request("GET", f"https://pypi.org/pypi/{pkg}/json").data)
+    return data["info"]

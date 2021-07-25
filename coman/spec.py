@@ -1,7 +1,10 @@
+from platform import platform
+from coman.system import env_prefix_conda_hash, env_prefix_pip_hash, system_platform
 import re
 from pathlib import Path
 import sys
 from typing import Callable, List, Optional, Tuple
+from collections import OrderedDict
 
 import ruamel.yaml as yaml
 
@@ -20,26 +23,77 @@ def require_spec_file():
         exit(1)
 
 
-def spec_platforms() -> Optional[List[str]]:
+def spec_platforms() -> List[str]:
+    sys_platform = system_platform()
     if not spec_file().exists():
-        return []
-
+        return [sys_platform]
     with open(spec_file()) as f:
         env = yaml.safe_load(f)
-    return env.get("platforms", None)
+    platforms = env.get("platforms", [sys_platform])
+    if sys_platform not in platforms:
+        print("WARNING: You system platform ({})", file=sys.stderr)
+    return platforms
 
 
-def lock_file(platform: str):
+# def spec_includes_pip():
+#     with open(spec_file()) as f:
+#         env = yaml.safe_load(f)
+
+#     for pkg in env["dependencies"]:
+#         if type(pkg) == str and pkg.split(" ")[0] == "pip":
+#             print(pkg["pip"])
+#             return True
+#     return False
+
+
+def spec_pip_requirements():
+    with open(spec_file()) as f:
+        env = yaml.safe_load(f)
+
+    for pkg in env["dependencies"]:
+        if isinstance(pkg, dict) and "pip" in pkg:
+            return "\n".join(pkg["pip"])
+    return None
+
+
+def conda_lock_file(platform: Optional[str] = None):
+    platform = platform or system_platform()
     return Path(f"conda-{platform}.lock")
 
 
-def lock_env_hash(lock_path: Path) -> str:
+def pip_lock_file():
+    return Path("requirements.txt")
+
+
+def conda_lock_hash() -> str:
+    with open(conda_lock_file()) as f:
+        for line in f:
+            m = ENV_HASH_PATTERN.search(line)
+            if m:
+                return m.group(1)
+        raise RuntimeError("Cannot find env_hash in conda lock file")
+
+
+def conda_outdated(conda_hash: Optional[str] = None):
+    conda_hash = conda_hash or conda_lock_hash()
+    return env_prefix_conda_hash() != conda_hash
+
+
+def pip_lock_hash() -> Optional[str]:
+    lock_path = pip_lock_file()
+    if not lock_path.exists():
+        return None
     with open(lock_path) as f:
         for line in f:
             m = ENV_HASH_PATTERN.search(line)
             if m:
                 return m.group(1)
-        raise RuntimeError("Cannot find env_hash in lockfile")
+        raise RuntimeError("Cannot find env_hash in pip lock file")
+
+
+def pip_outdated(pip_hash: Optional[str] = None):
+    pip_hash = pip_hash or pip_lock_hash()
+    return env_prefix_pip_hash() != pip_hash
 
 
 def edit_spec_file() -> Tuple[dict, Callable]:
