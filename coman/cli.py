@@ -8,10 +8,10 @@ import click
 from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
                                  micromamba_executables, safe_next)
 
-from coman.env import change_spec, env_install, env_lock, env_python_exe, env_python_version, env_show, env_uninstall
+from coman.env import change_spec, conda_pkg_info, env_install, env_lock, env_python_exe, env_python_version, env_search, env_show, env_uninstall
 from coman.spec import conda_lock_file, conda_outdated, pip_outdated, spec_file
 from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, conda_exe, env_name, env_prefix, envs_dir,
-                          is_micromamba, conda_search, system_exe, system_platform)
+                          is_micromamba, system_exe, system_platform)
 
 from ._version import __version__
 
@@ -139,17 +139,17 @@ def init():
         exit(1)
 
     print("Creating `environment.yml`")
-    pkg = conda_search("python", ["conda-forge"])
-    pkg = f"{pkg['name']} >={pkg['version']}"
+    pkg_info = conda_pkg_info("python", ["conda-forge"])
+    pkg_str = f"{pkg_info['name']} >={pkg_info['version']}"
 
     with open(spec_file(), "w") as f:
-        f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg}\n")
+        f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg_str}\n")
 
     env_lock()
 
 
 @cli.command()
-def lock(show: bool):
+def lock():
     """
     Lock the package specifications
     """
@@ -297,6 +297,14 @@ def shell(install: bool):
     print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
     print(f"eval \"$('{exe}' shell hook -s {shell})\";")
     print(f"micromamba activate \"{env_prefix()}\"")
+
+
+@cli.command()
+@click.argument("pkg")
+@click.option("--platform", default=None)
+@click.option("--limit", type=int, default=5)
+def search(pkg: str, platform: Optional[str], limit: int):
+    env_search(pkg, platform, limit)
 
 
 if __name__ == "__main__":

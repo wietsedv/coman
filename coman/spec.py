@@ -72,6 +72,12 @@ def spec_package_names() -> Tuple[List[str], List[str]]:
     return conda_names, pip_names
 
 
+def spec_channels() -> List[str]:
+    with open(spec_file()) as f:
+        env = yaml.safe_load(f)
+    return env["channels"]
+
+
 def conda_lock_file(platform: Optional[str] = None):
     platform = platform or system_platform()
     return Path(f"conda-{platform}.lock")

@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 from glob import glob
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 import click
 
 import ruamel.yaml as yaml
@@ -17,9 +17,9 @@ from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser import LockSpecification
 
 from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_file, pip_lock_hash,
-                        pip_outdated, require_spec_file, spec_file, spec_package_names, spec_pip_requirements,
-                        spec_platforms)
-from coman.system import (env_prefix, conda_search, pypi_search, run_exe, system_exe)
+                        pip_outdated, require_spec_file, spec_channels, spec_file, spec_package_names,
+                        spec_pip_requirements, spec_platforms)
+from coman.system import (env_prefix, pypi_pkg_info, run_exe, system_exe)
 
 
 def env_python_exe():
@@ -27,7 +27,7 @@ def env_python_exe():
 
 
 def env_python_version():
-    vstring = subprocess.check_output([env_python_exe(), "--version"], encoding="utf-8").split(" ")[-1]
+    vstring = subprocess.check_output([env_python_exe(), "--version"], encoding="utf-8").split(" ")[-1].strip()
     return LooseVersion(vstring)
 
 
@@ -331,9 +331,9 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
 
     def _add_pkg(pkg: str, pip: bool):
         if pip:
-            pkg_info = pypi_search(pkg)
+            pkg_info = pypi_pkg_info(pkg)
         else:
-            pkg_info = conda_search(pkg, spec_data["channels"])
+            pkg_info = conda_pkg_info(pkg, spec_data["channels"])
 
         name = pkg_info["name"]
         pkg = f"{name} >={pkg_info['version']}"
@@ -461,3 +461,61 @@ def env_show(query: List[str] = [], deps: bool = False, only_return: bool = Fals
             print(line)
 
     return data
+
+
+def conda_search(pkg: str,
+                 channels: Optional[List[str]] = None,
+                 platform: Optional[str] = None) -> List[Dict[str, Any]]:
+    channels = channels or spec_channels()
+    args = []
+    for c in channels:
+        args.extend(["-c", c])
+    if platform:
+        args.extend(["--subdir", platform])
+
+    out = run_exe(["search", pkg, *args, "--json"], check=False)
+    if not out:
+        print(f"Unable to query package through '{system_exe()}'", file=sys.stderr)
+        exit(1)
+    res = json.loads(out)
+    if "error" in res:
+        print(res["error"], file=sys.stderr)
+        exit(1)
+
+    if pkg not in res:
+        print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}", file=sys.stderr)
+        exit(1)
+
+    info = res[pkg]
+    for pkg_info in info:
+        pkg_info["channel"] = pkg_info["channel"].split("/")[-2]
+    return info
+
+
+def conda_pkg_info(pkg: str, channels: Optional[List[str]] = None):
+    return conda_search(pkg, channels)[-1]
+
+
+def env_search(pkg: str, platform: Optional[str], limit: int):
+    platforms = [platform] if platform else spec_platforms()
+
+    for i, platform in enumerate(platforms, start=1):
+        if i > 1:
+            print()
+        pkg_infos = conda_search(pkg, platform=platform)
+        if limit > 0:
+            pkg_infos = pkg_infos[-limit:]
+        click.secho(f"# platform: {click.style(platform, bold=True)}", fg="cyan")
+        if not pkg_infos:
+            click.secho("No results", fg="yellow")
+            exit(1)
+
+        for j, pkg_info in enumerate(pkg_infos, start=1):
+            bold = j == len(pkg_infos)
+            name_fmt = click.style(pkg_info["name"].ljust(20), fg="green", bold=bold)
+            version_fmt = click.style(pkg_info["version"].ljust(12), fg="blue", bold=bold)
+            build_fmt = click.style(pkg_info["build"].ljust(16), fg="bright_white", bold=bold)
+            channel_fmt = click.style(pkg_info["channel"].ljust(14), fg="bright_white", bold=bold)
+
+            line = f"{name_fmt} {version_fmt} {build_fmt} {channel_fmt}"
+            print(line)

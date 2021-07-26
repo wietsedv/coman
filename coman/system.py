@@ -6,7 +6,7 @@ import sys
 from distutils.version import LooseVersion
 from hashlib import md5
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ensureconda import ensureconda
 from ensureconda.resolve import conda_executables, conda_standalone_executables, platform_subdir, safe_next
@@ -142,30 +142,7 @@ def system_platform():
     return platform_subdir()
 
 
-def conda_search(pkg: str, channels: List[str]):
-    args = []
-    for c in channels:
-        args.extend(["-c", c])
-
-    out = run_exe(["search", pkg, *args, "--json"], check=False)
-    if not out:
-        print(f"Unable to query package through '{system_exe()}'", file=sys.stderr)
-        exit(1)
-    res = json.loads(out)
-    if "error" in res:
-        print(res["error"], file=sys.stderr)
-        exit(1)
-
-    if pkg not in res:
-        print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}", file=sys.stderr)
-        exit(1)
-
-    info = res[pkg][-1]
-    info["channel"] = info["channel"].split("/")[-2]
-    return info
-
-
-def pypi_search(pkg: str):
+def pypi_pkg_info(pkg: str):
     import urllib3
     http = urllib3.PoolManager()
     data = json.loads(http.request("GET", f"https://pypi.org/pypi/{pkg}/json").data)
