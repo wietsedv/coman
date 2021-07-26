@@ -22,11 +22,11 @@ class NaturalOrderGroup(click.Group):
 
 
 @click.group(cls=NaturalOrderGroup)
-@click.option('--mamba', default=False, is_flag=True)
-@click.option('--micromamba', default=False, is_flag=True)
-@click.option('--conda', default=False, is_flag=True)
+@click.option('--mamba/--no-mamba', default=None)
+@click.option('--micromamba/--no-micromamba', default=None)
+@click.option('--conda/--no-conda', default=None)
 @click.version_option()
-def cli(mamba: bool, micromamba: bool, conda: bool):
+def cli(mamba: Optional[bool], micromamba: Optional[bool], conda: Optional[bool]):
     if mamba or micromamba or conda:
         system_exe(mamba, micromamba, conda)
 

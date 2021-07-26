@@ -19,17 +19,18 @@ _envs_dir = None
 _env_name = None
 
 
-def system_exe(mamba: bool = None, micromamba: bool = None, conda: bool = None) -> Path:
+def system_exe(mamba: Optional[bool] = None, micromamba: Optional[bool] = None, conda: Optional[bool] = None) -> Path:
     global _exe
-
     if _exe:
         assert mamba is None and micromamba is None and conda is None
         return _exe
 
     if mamba or micromamba or conda:
-        assert mamba is not None and micromamba is not None and conda is not None
+        mamba = mamba or False
+        micromamba = micromamba or False
+        conda = conda or False
     else:
-        mamba, micromamba, conda = True, False, True
+        mamba, micromamba, conda = False, False, True
 
     e = ensureconda(
         mamba=mamba,
@@ -58,8 +59,9 @@ def conda_exe(standalone: bool = True):
         return Path(exe)
 
 
-def run_exe(args: List[Any], check: bool = True):
-    args = [str(a) for a in [system_exe(), *args]]
+def run_exe(args: List[Any], check: bool = True, exe: Optional[Path] = None):
+    exe = exe or system_exe()
+    args = [str(a) for a in [exe, *args]]
     p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
     if check and p.returncode != 0:
         if p.stdout:

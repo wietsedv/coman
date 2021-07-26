@@ -19,7 +19,7 @@ from conda_lock.src_parser import LockSpecification
 from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_file, pip_lock_hash,
                         pip_outdated, require_spec_file, spec_channels, spec_file, spec_package_names,
                         spec_pip_requirements, spec_platforms)
-from coman.system import (env_prefix, pypi_pkg_info, run_exe, system_exe)
+from coman.system import (conda_exe, env_prefix, pypi_pkg_info, run_exe, system_exe)
 
 _COL_COLORS = {
     "name": "green",
@@ -498,7 +498,7 @@ def conda_search(pkg: str,
     if platform:
         args.extend(["--subdir", platform])
 
-    out = run_exe(["search", pkg, *args, "--json"], check=False)
+    out = run_exe(["search", pkg, *args, "--json"], check=False, exe=conda_exe())
     if not out:
         print(f"Unable to query package through '{system_exe()}'", file=sys.stderr)
         exit(1)
