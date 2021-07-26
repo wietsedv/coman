@@ -5,7 +5,6 @@ import subprocess
 import sys
 from distutils.version import LooseVersion
 from hashlib import md5
-from os import PathLike
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -161,12 +160,15 @@ def conda_search(pkg: str, channels: List[str]):
         print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}", file=sys.stderr)
         exit(1)
 
-    pkg_ = max(res[pkg], key=lambda p: p.get("timestamp", 0))
-    return pkg_
+    info = res[pkg][-1]
+    info["channel"] = info["channel"].split("/")[-2]
+    return info
 
 
 def pypi_search(pkg: str):
     import urllib3
     http = urllib3.PoolManager()
     data = json.loads(http.request("GET", f"https://pypi.org/pypi/{pkg}/json").data)
-    return data["info"]
+    info = data["info"]
+    info["channel"] = "pypi"
+    return info

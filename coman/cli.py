@@ -177,46 +177,58 @@ def install(prune: Optional[bool], force: bool):
 
 
 @cli.command()
+@click.option("--install/--no-install", default=True)
 @click.option("--prune/--no-prune", default=None)
 @click.option("--force", default=False, is_flag=True)
-def update(prune: Optional[bool], force: bool):
+def update(install: bool, prune: Optional[bool], force: bool):
     """
     Update the lock file(s) and install the new environment
     """
     env_lock()
-    env_install(prune=prune, force=force)
+    if install:
+        print()
+        env_install(prune=prune, force=force)
 
 
 @cli.command()
 @click.argument("pkgs", nargs=-1)
-@click.option("--prune/--no-prune", default=None)
 @click.option("--pip", default=False, is_flag=True)
-def add(pkgs: List[str], prune: Optional[bool], pip: bool):
+@click.option("--update/--no-update", default=True)
+@click.option("--install/--no-install", default=None)
+@click.option("--prune/--no-prune", default=None)
+@click.option("--force", default=False, is_flag=True)
+def add(pkgs: List[str], pip: bool, update: bool, install: Optional[bool], prune: Optional[bool], force: bool):
     """
     Add a package to environment.yml, update the lock file(s) and install the environment
     """
-    # TODO Add platform filters with i.e. "# [linux64]" filter_platform_selectors()
-    change_spec(add_pkgs=pkgs, prune=prune, pip=pip)
+    print("Adding:", ", ".join(pkgs) + "\n", file=sys.stderr)
+    change_spec(add_pkgs=pkgs, remove_pkgs=[], pip=pip, update=update, install=install, prune=prune, force=force)
 
 
 @cli.command()
 @click.argument("pkgs", nargs=-1)
-@click.option("--prune/--no-prune", default=None)
 @click.option("--pip", default=False, is_flag=True)
-def remove(pkgs: List[str], prune: Optional[bool], pip: bool):
+@click.option("--update/--no-update", default=True)
+@click.option("--install/--no-install", default=None)
+@click.option("--prune/--no-prune", default=None)
+@click.option("--force", default=False, is_flag=True)
+def remove(pkgs: List[str], pip: bool, update: bool, install: bool, prune: Optional[bool], force: bool):
     """
     Remove a package from environment.yml, update the lock file(s) and install the environment
     """
-    change_spec(remove_pkgs=pkgs, prune=prune, pip=pip)
+    print("Removing:", ", ".join(pkgs) + "\n", file=sys.stderr)
+    change_spec(add_pkgs=[], remove_pkgs=pkgs, pip=pip, update=update, install=install, prune=prune, force=force)
 
 
 @cli.command()
 @click.argument("query", nargs=-1)
-def show(query: List[str]):
+@click.option("--deps/--no-deps", default=False, help="Include installed dependencies of your packages.")
+def show(query: List[str], deps: bool):
     """
     Show packages in the current environment
     """
-    env_show(query)
+    env_install(quiet=True)
+    env_show(query, deps)
 
 
 @cli.command()
@@ -227,7 +239,7 @@ def run(args):
 
     Automatically installs the environment if it does not exist yet.
     """
-    env_install()
+    env_install(quiet=True)
 
     # Currently only works with conda
     exe = conda_exe(standalone=False)
@@ -244,7 +256,7 @@ def shell():
 
     Automatically installs the environment if it does not exist yet.
     """
-    env_install()
+    env_install(quiet=True)
 
     shell = Path(os.environ["SHELL"]).name
 

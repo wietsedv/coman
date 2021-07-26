@@ -71,10 +71,26 @@ def _env_lock_conda():
     new_lock_paths = [str(conda_lock_file(p)) for p in platforms]
     for lock_path in glob(str(conda_lock_file("*"))):
         if lock_path not in new_lock_paths:
+            print(
+                click.style("   lock:", fg="bright_white"),
+                "Removing",
+                click.style("Conda", fg="magenta"),
+                "lock file",
+                click.style(f"[{lock_path}]", fg="bright_white"),
+                file=sys.stderr,
+            )
             os.remove(lock_path)
 
     for platform in platforms:
-        print(f"Generating lock file for {platform}", file=sys.stderr)
+        print(
+            click.style("   lock:", fg="bright_white"),
+            "Generating",
+            click.style("Conda", fg="magenta"),
+            "lock file for",
+            click.style(platform, fg="cyan"),
+            click.style(f"[{conda_lock_file(platform)}]", fg="bright_white"),
+            file=sys.stderr,
+        )
         lock_spec = parse_environment_file(spec_file(), platform)
         lock_contents = create_lockfile_from_spec(
             channels=lock_spec.channels,
@@ -116,11 +132,25 @@ def _env_lock_pip():
     requirements = spec_pip_requirements()
     if not requirements:
         if pip_lock_file().exists():
-            print("Removing Pip lock file", file=sys.stderr)
+            print(
+                click.style("   lock:", fg="bright_white"),
+                "Removing",
+                click.style("Pip", fg="magenta"),
+                "lock file",
+                click.style(f"[{pip_lock_file()}]", fg="bright_white"),
+                file=sys.stderr,
+            )
             os.remove(pip_lock_file())
         return
 
-    print("Generating lock file for pip", file=sys.stderr)
+    print(
+        click.style("   lock:", fg="bright_white"),
+        "Generating",
+        click.style("Pip", fg="magenta"),
+        "lock file",
+        click.style(f"[{pip_lock_file()}]", fg="bright_white"),
+        file=sys.stderr,
+    )
     lock = _run_pip_compile(requirements)
 
     lock_hash = hashlib.sha256(lock.encode("utf-8")).hexdigest()
@@ -138,9 +168,17 @@ def env_lock(conda: bool = True, pip: bool = True):
 
 
 def _env_install_conda(prune: bool):
-    print("Installing Conda environment" + " [prune]" if prune else "", file=sys.stderr)
-    lock_path = conda_lock_file()
     prefix = env_prefix()
+    lock_path = conda_lock_file()
+    print(
+        click.style("install:", fg="bright_white"),
+        "Installing",
+        click.style("Conda", fg="magenta"),
+        "environment",
+        click.style("<create>", fg="red") if prune else click.style("<update>", fg="green"),
+        click.style(f"[{lock_path}]", fg="bright_white"),
+        file=sys.stderr,
+    )
     args = [
         "create" if prune or not prefix.exists() else "update",
         "--file",
@@ -150,19 +188,27 @@ def _env_install_conda(prune: bool):
         "--yes",
     ]
     if not run_exe(args):
-        print(f"\nCould not install {lock_path} into {prefix}", file=sys.stderr)
+        click.secho(f"\nCould not install {lock_path} into {prefix}", fg="red", file=sys.stderr)
         exit(1)
 
 
 def _env_install_pip():
-    print("Installing Pip packages", file=sys.stderr)
+    lock_path = pip_lock_file()
+    print(
+        click.style("install:", fg="bright_white"),
+        "Installing",
+        click.style("Pip", fg="magenta"),
+        "packages",
+        click.style(f"[{lock_path}]", fg="bright_white"),
+        file=sys.stderr,
+    )
     args = [
         env_python_exe(),
         "-m",
         "pip",
         "install",
         "-r",
-        "requirements.txt",
+        lock_path,
         "--no-deps",
         "--disable-pip-version-check",
         "--no-input",
@@ -174,7 +220,7 @@ def _env_install_pip():
         exit(1)
 
 
-def env_install(prune: Optional[bool] = None, force: bool = False):
+def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool = False):
     require_spec_file()
 
     use_pip = bool(spec_pip_requirements())
@@ -195,8 +241,14 @@ def env_install(prune: Optional[bool] = None, force: bool = False):
         _env_install_conda(prune)
         with open(env_prefix() / "conda_hash.txt", "w") as f:
             f.write(conda_hash)
-    else:
-        print("Conda environment is already up-to-date", file=sys.stderr)
+    elif not quiet:
+        print(
+            click.style("install:", fg="bright_white"),
+            click.style("Conda", fg="magenta"),
+            "environment is already",
+            click.style("up-to-date", fg="green"),
+            file=sys.stderr,
+        )
 
     # Pip
     pip_hash_path = env_prefix() / "pip_hash.txt"
@@ -205,8 +257,14 @@ def env_install(prune: Optional[bool] = None, force: bool = False):
             _env_install_pip()
             with open(pip_hash_path, "w") as f:
                 f.write(pip_hash)
-        else:
-            print("Pip packages are already up-to-date", file=sys.stderr)
+        elif not quiet:
+            print(
+                click.style("install:", fg="bright_white"),
+                click.style("Pip", fg="magenta"),
+                "packages are already",
+                click.style("up-to-date", fg="green"),
+                file=sys.stderr,
+            )
     elif pip_hash_path.exists():
         os.remove(pip_hash_path)
 
@@ -215,7 +273,8 @@ def env_uninstall():
     run_exe(["env", "remove", "--prefix", env_prefix()])
 
 
-def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = [], prune: Optional[bool] = None, pip: bool = False):
+def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, update: bool, install: Optional[bool],
+                prune: Optional[bool], force: bool):
     require_spec_file()
     spec_data, save_spec_file = edit_spec_file()
 
@@ -233,6 +292,7 @@ def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = [], prune: Op
 
         name = pkg_info["name"]
         pkg = f"{name} >={pkg_info['version']}"
+        channel = pkg_info["channel"]
 
         i = len(deps)
         if name in dep_names:
@@ -243,18 +303,28 @@ def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = [], prune: Op
 
         deps.insert(i, pkg)
         dep_names.insert(i, name)
-        print(f"Added '{pkg}' to spec", file=sys.stderr)
+
+        name, ver = pkg.split()
+        pkg_str = f"{click.style(name, fg='green')} ({click.style(ver, fg='blue')})"
+        print(
+            click.style("   spec:", fg="bright_white"),
+            f"Added {pkg_str} to dependencies",
+            click.style(f"[{channel}]", fg="bright_white"),
+            file=sys.stderr,
+        )
         return True
 
     def _remove_pkg(pkg: str):
         if pkg not in dep_names:
-            print(f"Dependency {pkg} not found", file=sys.stderr)
             return False
 
         i = dep_names.index(pkg)
         pkg = deps.pop(i)
         dep_names.pop(i)
-        print(f"Removed '{pkg}' from spec", file=sys.stderr)
+
+        name, ver = pkg.split()
+        pkg_str = f"{click.style(name, fg='green')} ({click.style(ver, fg='blue')})"
+        print(click.style("   spec:", fg="bright_white"), f"Removed {pkg_str} from dependencies", file=sys.stderr)
         return True
 
     if pip:
@@ -282,15 +352,29 @@ def change_spec(add_pkgs: List[str] = [], remove_pkgs: List[str] = [], prune: Op
         if _remove_pkg(pkg):
             changed = True
 
-    if changed:
-        save_spec_file()
+    if not changed:
+        if add_pkgs:
+            print(click.style("   spec:", fg="bright_white"),
+                  click.style("No new dependencies added", fg="yellow"),
+                  file=sys.stderr)
+        if remove_pkgs:
+            print(click.style("   spec:", fg="bright_white"),
+                  click.style("No dependencies removed", fg="yellow"),
+                  file=sys.stderr)
+
+    save_spec_file()
+    if update:
+        print(file=sys.stderr)
         env_lock(conda=not pip)
 
-    if (changed or prune) and env_prefix().exists():
-        env_install(prune=prune, force=False)
+    if install is None:
+        install = env_prefix().exists()
+    if update and install:
+        print(file=sys.stderr)
+        env_install(prune=prune, force=force)
 
 
-def env_show(query: List[str]):
+def env_show(query: List[str] = [], deps: bool = True):
     out = run_exe(["list", "--prefix", env_prefix(), *query, "--json"])
     if not out:
         print("No results", file=sys.stderr)
@@ -300,11 +384,13 @@ def env_show(query: List[str]):
     conda_names, pip_names = spec_package_names()
     for pkg_info in res:
         name, version, channel = pkg_info["name"], pkg_info["version"], pkg_info["channel"]
+        if not deps and not (name in conda_names or name in pip_names):
+            continue
 
         fg, warning = None, ""
         if channel == "pypi":
             if name in pip_names:
-                fg = "blue"
+                fg = "cyan"
             else:
                 warning = "WARNING: implicit pip dependency"
             if name in conda_names:
@@ -313,10 +399,10 @@ def env_show(query: List[str]):
             if name in conda_names:
                 fg = "green"
 
-        name_fmt = click.style(name.ljust(20), fg=fg, bold=True)
-        version_fmt = click.style(version.ljust(10), fg=fg)
-        channel_fmt = click.style(channel.ljust(14), fg="bright_black")
+        name_fmt = click.style(name.ljust(20), fg=fg)
+        version_fmt = click.style(version.ljust(12), fg="blue")
+        channel_fmt = click.style(channel.ljust(14), fg="cyan" if channel == "pypi" else "bright_white")
         warning_str = click.style(warning.ljust(20), fg="yellow")
 
         line = f"{name_fmt} {version_fmt} {channel_fmt} {warning_str}"
-        click.echo(line)
+        print(line)
