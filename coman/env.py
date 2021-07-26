@@ -161,6 +161,7 @@ def _env_lock_pip():
 
 def env_lock(conda: bool = True, pip: bool = True):
     require_spec_file()
+
     if conda:
         _env_lock_conda()
     if pip:
@@ -220,8 +221,10 @@ def _env_install_pip():
         exit(1)
 
 
-def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool = False):
+def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool = False, show: bool = False):
     require_spec_file()
+
+    old_pkgs = env_show(deps=True, only_return=True) if show and env_prefix().exists() else {}
 
     use_pip = bool(spec_pip_requirements())
     if not conda_lock_file().exists() or (use_pip and not pip_lock_file().exists()):
@@ -268,13 +271,55 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
     elif pip_hash_path.exists():
         os.remove(pip_hash_path)
 
+    if show:
+        new_pkgs = env_show(deps=True, only_return=True)
+        if new_pkgs != old_pkgs:
+            print()
+
+            for name, info in old_pkgs.items():
+                if name not in new_pkgs:
+                    print(
+                        click.style("install:", fg="bright_white"),
+                        "- Removed",
+                        click.style(name.ljust(15), fg="red"),
+                        f"({click.style(info['version'], fg='blue')})",
+                        click.style(f"[{info['channel']}]", fg="bright_white"),
+                        file=sys.stderr,
+                    )
+
+            for name, info in new_pkgs.items():
+                pypi = info['channel'] == "pypi"
+                name_str = click.style(name.ljust(15), fg="cyan" if pypi else "green")
+                channel_str = click.style(f"[{info['channel']}]", fg="cyan" if pypi else "bright_white")
+                if name not in old_pkgs:
+                    print(
+                        click.style("install:", fg="bright_white"),
+                        "+   Added",
+                        name_str,
+                        f"({click.style(info['version'], fg='blue')})",
+                        channel_str,
+                        file=sys.stderr,
+                    )
+                    continue
+
+                old_info = old_pkgs[name]
+                if old_info != info:
+                    print(
+                        click.style("install:", fg="bright_white"),
+                        "* Updated",
+                        name_str,
+                        f"({click.style(old_info['version'], fg='red')} => {click.style(info['version'], fg='blue')})",
+                        channel_str,
+                        file=sys.stderr,
+                    )
+
 
 def env_uninstall():
     run_exe(["env", "remove", "--prefix", env_prefix()])
 
 
 def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, update: bool, install: Optional[bool],
-                prune: Optional[bool], force: bool):
+                prune: Optional[bool], force: bool, show: bool):
     require_spec_file()
     spec_data, save_spec_file = edit_spec_file()
 
@@ -369,12 +414,14 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
 
     if install is None:
         install = env_prefix().exists()
+
+    prune = len(remove_pkgs) > 0 or prune
     if update and install:
         print(file=sys.stderr)
-        env_install(prune=prune, force=force)
+        env_install(prune=prune, force=force, show=show)
 
 
-def env_show(query: List[str] = [], deps: bool = True):
+def env_show(query: List[str] = [], deps: bool = False, only_return: bool = False):
     out = run_exe(["list", "--prefix", env_prefix(), *query, "--json"])
     if not out:
         print("No results", file=sys.stderr)
@@ -382,6 +429,7 @@ def env_show(query: List[str] = [], deps: bool = True):
     res = json.loads(out)
 
     conda_names, pip_names = spec_package_names()
+    data = {}
     for pkg_info in res:
         name, version, channel = pkg_info["name"], pkg_info["version"], pkg_info["channel"]
         if not deps and not (name in conda_names or name in pip_names):
@@ -399,10 +447,17 @@ def env_show(query: List[str] = [], deps: bool = True):
             if name in conda_names:
                 fg = "green"
 
-        name_fmt = click.style(name.ljust(20), fg=fg)
-        version_fmt = click.style(version.ljust(12), fg="blue")
-        channel_fmt = click.style(channel.ljust(14), fg="cyan" if channel == "pypi" else "bright_white")
-        warning_str = click.style(warning.ljust(20), fg="yellow")
+        data[name] = {
+            "version": version,
+            "channel": channel,
+        }
+        if not only_return:
+            name_fmt = click.style(name.ljust(20), fg=fg)
+            version_fmt = click.style(version.ljust(12), fg="blue")
+            channel_fmt = click.style(channel.ljust(14), fg="cyan" if channel == "pypi" else "bright_white")
+            warning_str = click.style(warning.ljust(20), fg="yellow")
 
-        line = f"{name_fmt} {version_fmt} {channel_fmt} {warning_str}"
-        print(line)
+            line = f"{name_fmt} {version_fmt} {channel_fmt} {warning_str}"
+            print(line)
+
+    return data

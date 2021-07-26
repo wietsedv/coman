@@ -149,11 +149,83 @@ def init():
 
 
 @cli.command()
-def lock():
+def lock(show: bool):
     """
     Lock the package specifications
     """
     env_lock()
+
+
+@cli.command()
+@click.option("--prune/--no-prune", default=None)
+@click.option("--force", default=False, is_flag=True)
+@click.option("--show/--no-show", default=True)
+def install(prune: Optional[bool], force: bool, show: bool):
+    """
+    Install the environment based on the lock file
+    """
+    env_install(prune=prune, force=force, show=show)
+
+
+@cli.command()
+@click.option("--install/--no-install", default=True)
+@click.option("--prune/--no-prune", default=None)
+@click.option("--force", default=False, is_flag=True)
+@click.option("--show/--no-show", default=True)
+def update(install: bool, prune: Optional[bool], force: bool, show: bool):
+    """
+    Update the lock file(s) and install the new environment
+    """
+    env_lock()
+    if install:
+        print()
+        env_install(prune=prune, force=force, show=show)
+
+
+@cli.command()
+@click.argument("pkgs", nargs=-1)
+@click.option("--pip", default=False, is_flag=True)
+@click.option("--update/--no-update", default=True)
+@click.option("--install/--no-install", default=None)
+@click.option("--prune/--no-prune", default=None)
+@click.option("--force", default=False, is_flag=True)
+@click.option("--show/--no-show", default=True)
+def add(pkgs: List[str], pip: bool, update: bool, install: Optional[bool], prune: Optional[bool], force: bool,
+        show: bool):
+    """
+    Add a package to environment.yml, update the lock file(s) and install the environment
+    """
+    change_spec(add_pkgs=pkgs,
+                remove_pkgs=[],
+                pip=pip,
+                update=update,
+                install=install,
+                prune=prune,
+                force=force,
+                show=show)
+
+
+@cli.command()
+@click.argument("pkgs", nargs=-1)
+@click.option("--pip", default=False, is_flag=True)
+@click.option("--update/--no-update", default=True)
+@click.option("--install/--no-install", default=None)
+@click.option("--prune/--no-prune", default=None)
+@click.option("--force", default=False, is_flag=True)
+@click.option("--show/--no-show", default=True)
+def remove(pkgs: List[str], pip: bool, update: bool, install: Optional[bool], prune: Optional[bool], force: bool,
+           show: bool):
+    """
+    Remove a package from environment.yml, update the lock file(s) and install the environment
+    """
+    change_spec(add_pkgs=[],
+                remove_pkgs=pkgs,
+                pip=pip,
+                update=update,
+                install=install,
+                prune=prune,
+                force=force,
+                show=show)
 
 
 @cli.command()
@@ -167,79 +239,29 @@ def uninstall():
 
 
 @cli.command()
-@click.option("--prune/--no-prune", default=None)
-@click.option("--force", default=False, is_flag=True)
-def install(prune: Optional[bool], force: bool):
-    """
-    Install the environment based on the lock file
-    """
-    env_install(prune=prune, force=force)
-
-
-@cli.command()
-@click.option("--install/--no-install", default=True)
-@click.option("--prune/--no-prune", default=None)
-@click.option("--force", default=False, is_flag=True)
-def update(install: bool, prune: Optional[bool], force: bool):
-    """
-    Update the lock file(s) and install the new environment
-    """
-    env_lock()
-    if install:
-        print()
-        env_install(prune=prune, force=force)
-
-
-@cli.command()
-@click.argument("pkgs", nargs=-1)
-@click.option("--pip", default=False, is_flag=True)
-@click.option("--update/--no-update", default=True)
-@click.option("--install/--no-install", default=None)
-@click.option("--prune/--no-prune", default=None)
-@click.option("--force", default=False, is_flag=True)
-def add(pkgs: List[str], pip: bool, update: bool, install: Optional[bool], prune: Optional[bool], force: bool):
-    """
-    Add a package to environment.yml, update the lock file(s) and install the environment
-    """
-    print("Adding:", ", ".join(pkgs) + "\n", file=sys.stderr)
-    change_spec(add_pkgs=pkgs, remove_pkgs=[], pip=pip, update=update, install=install, prune=prune, force=force)
-
-
-@cli.command()
-@click.argument("pkgs", nargs=-1)
-@click.option("--pip", default=False, is_flag=True)
-@click.option("--update/--no-update", default=True)
-@click.option("--install/--no-install", default=None)
-@click.option("--prune/--no-prune", default=None)
-@click.option("--force", default=False, is_flag=True)
-def remove(pkgs: List[str], pip: bool, update: bool, install: bool, prune: Optional[bool], force: bool):
-    """
-    Remove a package from environment.yml, update the lock file(s) and install the environment
-    """
-    print("Removing:", ", ".join(pkgs) + "\n", file=sys.stderr)
-    change_spec(add_pkgs=[], remove_pkgs=pkgs, pip=pip, update=update, install=install, prune=prune, force=force)
-
-
-@cli.command()
 @click.argument("query", nargs=-1)
+@click.option("--install/--no-install", default=True)
 @click.option("--deps/--no-deps", default=False, help="Include installed dependencies of your packages.")
-def show(query: List[str], deps: bool):
+def show(query: List[str], install: bool, deps: bool):
     """
     Show packages in the current environment
     """
-    env_install(quiet=True)
+    if install:
+        env_install(quiet=True)
     env_show(query, deps)
 
 
 @cli.command()
 @click.argument("args", nargs=-1)
-def run(args):
+@click.option("--install/--no-install", default=True)
+def run(args, install: bool):
     """
     Run a command within the environment
 
     Automatically installs the environment if it does not exist yet.
     """
-    env_install(quiet=True)
+    if install:
+        env_install(quiet=True)
 
     # Currently only works with conda
     exe = conda_exe(standalone=False)
@@ -250,13 +272,15 @@ def run(args):
 
 
 @cli.command()
-def shell():
+@click.option("--install/--no-install", default=True)
+def shell(install: bool):
     """
     Activate the environment with `eval $(coman shell)`
 
     Automatically installs the environment if it does not exist yet.
     """
-    env_install(quiet=True)
+    if install:
+        env_install(quiet=True)
 
     shell = Path(os.environ["SHELL"]).name
 

@@ -4,9 +4,9 @@ import re
 from pathlib import Path
 import sys
 from typing import Callable, List, Optional, Tuple
-from collections import OrderedDict
 
 import ruamel.yaml as yaml
+import click
 
 ENV_HASH_PATTERN = re.compile(r"^# env_hash: (.*)$")
 PLATFORM_PATTERN = re.compile(r"^# platform: (.*)$")
@@ -31,7 +31,9 @@ def spec_platforms() -> List[str]:
         env = yaml.safe_load(f)
     platforms = env.get("platforms", [sys_platform])
     if sys_platform not in platforms:
-        print(f"WARNING: Platform {sys_platform} is not whitelisted in {spec_file()}", file=sys.stderr)
+        click.secho(f"WARNING: Platform {sys_platform} is not whitelisted in {spec_file()}\n",
+                    fg="yellow",
+                    file=sys.stderr)
     return platforms
 
 
