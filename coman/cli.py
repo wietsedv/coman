@@ -242,13 +242,14 @@ def uninstall():
 @click.argument("query", nargs=-1)
 @click.option("--install/--no-install", default=True)
 @click.option("--deps/--no-deps", default=False, help="Include installed dependencies of your packages.")
-def show(query: List[str], install: bool, deps: bool):
+@click.option("--pip/--no-pip", default=None)
+def show(query: List[str], install: bool, deps: bool, pip: Optional[bool]):
     """
     Show packages in the current environment
     """
     if install:
         env_install(quiet=True)
-    env_show(query, deps)
+    env_show(query, deps, pip)
 
 
 @cli.command()

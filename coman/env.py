@@ -21,6 +21,15 @@ from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_l
                         spec_pip_requirements, spec_platforms)
 from coman.system import (env_prefix, pypi_pkg_info, run_exe, system_exe)
 
+_COL_COLORS = {
+    "name": "green",
+    "version": "blue",
+    "old_version": "red",
+    "build": "yellow",
+    "channel": "bright_white",
+    "pypi": "cyan"
+}
+
 
 def env_python_exe():
     return env_prefix() / "bin" / "python"
@@ -74,9 +83,8 @@ def _env_lock_conda():
             print(
                 click.style("   lock:", fg="bright_white"),
                 "Removing",
-                click.style("Conda", fg="magenta"),
+                click.style("Conda", fg="green", bold=True),
                 "lock file",
-                click.style(f"[{lock_path}]", fg="bright_white"),
                 file=sys.stderr,
             )
             os.remove(lock_path)
@@ -85,10 +93,9 @@ def _env_lock_conda():
         print(
             click.style("   lock:", fg="bright_white"),
             "Generating",
-            click.style("Conda", fg="magenta"),
+            click.style("Conda", fg="green", bold=True),
             "lock file for",
-            click.style(platform, fg="cyan"),
-            click.style(f"[{conda_lock_file(platform)}]", fg="bright_white"),
+            click.style(platform, fg="magenta"),
             file=sys.stderr,
         )
         lock_spec = parse_environment_file(spec_file(), platform)
@@ -135,9 +142,8 @@ def _env_lock_pip():
             print(
                 click.style("   lock:", fg="bright_white"),
                 "Removing",
-                click.style("Pip", fg="magenta"),
+                click.style("Pip", fg="cyan", bold=True),
                 "lock file",
-                click.style(f"[{pip_lock_file()}]", fg="bright_white"),
                 file=sys.stderr,
             )
             os.remove(pip_lock_file())
@@ -146,9 +152,8 @@ def _env_lock_pip():
     print(
         click.style("   lock:", fg="bright_white"),
         "Generating",
-        click.style("Pip", fg="magenta"),
+        click.style("Pip", fg="cyan", bold=True),
         "lock file",
-        click.style(f"[{pip_lock_file()}]", fg="bright_white"),
         file=sys.stderr,
     )
     lock = _run_pip_compile(requirements)
@@ -174,10 +179,9 @@ def _env_install_conda(prune: bool):
     print(
         click.style("install:", fg="bright_white"),
         "Installing",
-        click.style("Conda", fg="magenta"),
+        click.style("Conda", fg="green", bold=True),
         "environment",
         click.style("<create>", fg="red") if prune else click.style("<update>", fg="green"),
-        click.style(f"[{lock_path}]", fg="bright_white"),
         file=sys.stderr,
     )
     args = [
@@ -198,9 +202,8 @@ def _env_install_pip():
     print(
         click.style("install:", fg="bright_white"),
         "Installing",
-        click.style("Pip", fg="magenta"),
+        click.style("Pip", fg="cyan", bold=True),
         "packages",
-        click.style(f"[{lock_path}]", fg="bright_white"),
         file=sys.stderr,
     )
     args = [
@@ -221,10 +224,31 @@ def _env_install_pip():
         exit(1)
 
 
+def _pkg_str_lengths(pkg_infos: List[Dict[str, Any]], cols: List[str]):
+    return {col: max(map(lambda x: len(x[col]), pkg_infos)) for col in cols}
+
+
+def _format_pkg_str(pkg_info: dict, cols: List[str], pkg_str_lengths: Dict[str, int], bold: bool = False):
+    col_strs = []
+    for col in cols:
+        if pkg_str_lengths[col] == 0:
+            continue
+        fg = _COL_COLORS[col]
+        if col == "name" and pkg_info["channel"] == "pypi":
+            fg = _COL_COLORS["pypi"]
+        col_strs.append(click.style(pkg_info.get(col, "").ljust(pkg_str_lengths[col]), fg=fg, bold=bold))
+
+    if pkg_str_lengths.get("old_version", 0) > 0 and pkg_str_lengths.get("version", 0) > 0:
+        i = cols.index("old_version")
+        oldv = col_strs.pop(i)
+        col_strs[i] = f"{oldv} ➜ {col_strs[i]}"
+    return "  ".join(col_strs)
+
+
 def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool = False, show: bool = False):
     require_spec_file()
 
-    old_pkgs = env_show(deps=True, only_return=True) if show and env_prefix().exists() else {}
+    old_pkgs = env_show(deps=True, only_return=True) if show and env_prefix().exists() else []
 
     use_pip = bool(spec_pip_requirements())
     if not conda_lock_file().exists() or (use_pip and not pip_lock_file().exists()):
@@ -247,9 +271,8 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
     elif not quiet:
         print(
             click.style("install:", fg="bright_white"),
-            click.style("Conda", fg="magenta"),
-            "environment is already",
-            click.style("up-to-date", fg="green"),
+            click.style("Conda", fg="green", bold=True),
+            "environment is already up-to-date",
             file=sys.stderr,
         )
 
@@ -263,9 +286,8 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
         elif not quiet:
             print(
                 click.style("install:", fg="bright_white"),
-                click.style("Pip", fg="magenta"),
-                "packages are already",
-                click.style("up-to-date", fg="green"),
+                click.style("Pip", fg="cyan", bold=True),
+                "packages are already up-to-date",
                 file=sys.stderr,
             )
     elif pip_hash_path.exists():
@@ -276,42 +298,47 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
         if new_pkgs != old_pkgs:
             print()
 
-            for name, info in old_pkgs.items():
-                if name not in new_pkgs:
-                    print(
-                        click.style("install:", fg="bright_white"),
-                        "- Removed",
-                        click.style(name.ljust(15), fg="red"),
-                        f"({click.style(info['version'], fg='blue')})",
-                        click.style(f"[{info['channel']}]", fg="bright_white"),
-                        file=sys.stderr,
-                    )
+            new_pkg_names = [pkg_info["name"] for pkg_info in new_pkgs]
+            old_pkg_names = [pkg_info["name"] for pkg_info in old_pkgs]
 
-            for name, info in new_pkgs.items():
-                pypi = info['channel'] == "pypi"
-                name_str = click.style(name.ljust(15), fg="cyan" if pypi else "green")
-                channel_str = click.style(f"[{info['channel']}]", fg="cyan" if pypi else "bright_white")
-                if name not in old_pkgs:
-                    print(
-                        click.style("install:", fg="bright_white"),
-                        "+   Added",
-                        name_str,
-                        f"({click.style(info['version'], fg='blue')})",
-                        channel_str,
-                        file=sys.stderr,
-                    )
-                    continue
+            del_pkgs = [pkg for pkg in old_pkgs if pkg["name"] not in new_pkg_names]
+            add_pkgs = [pkg for pkg in new_pkgs if pkg["name"] not in old_pkg_names]
+            upd_pkgs = [pkg for pkg in new_pkgs if pkg["name"] in old_pkg_names and pkg not in old_pkgs]
 
-                old_info = old_pkgs[name]
-                if old_info != info:
-                    print(
-                        click.style("install:", fg="bright_white"),
-                        "* Updated",
-                        name_str,
-                        f"({click.style(old_info['version'], fg='red')} => {click.style(info['version'], fg='blue')})",
-                        channel_str,
-                        file=sys.stderr,
-                    )
+            for pkg in del_pkgs:
+                pkg["old_version"] = pkg["version"]
+                pkg["version"] = ""
+            for pkg in add_pkgs:
+                pkg["old_version"] = ""
+            for pkg in upd_pkgs:
+                pkg["old_version"] = old_pkgs[old_pkg_names.index(pkg["name"])]["version"]
+
+            cols = ["name", "old_version", "version", "channel"]
+            pkg_str_lengths = _pkg_str_lengths(del_pkgs + add_pkgs + upd_pkgs, cols)
+
+            for pkg_info in del_pkgs:
+                line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
+                print(click.style("install:", fg="bright_white"),
+                      click.style("-", fg="red"),
+                      "Removed",
+                      line,
+                      file=sys.stderr)
+
+            for pkg_info in upd_pkgs:
+                line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
+                print(click.style("install:", fg="bright_white"),
+                      click.style("*", fg="yellow"),
+                      "Updated",
+                      line,
+                      file=sys.stderr)
+
+            for pkg_info in add_pkgs:
+                line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
+                print(click.style("install:", fg="bright_white"),
+                      click.style("+", fg="green"),
+                      "  Added",
+                      line,
+                      file=sys.stderr)
 
 
 def env_uninstall():
@@ -350,7 +377,7 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
         dep_names.insert(i, name)
 
         name, ver = pkg.split()
-        pkg_str = f"{click.style(name, fg='green')} ({click.style(ver, fg='blue')})"
+        pkg_str = f"{click.style(name, fg='cyan' if pip else 'green')} ({click.style(ver, fg='blue')})"
         print(
             click.style("   spec:", fg="bright_white"),
             f"Added {pkg_str} to dependencies",
@@ -368,13 +395,14 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
         dep_names.pop(i)
 
         name, ver = pkg.split()
-        pkg_str = f"{click.style(name, fg='green')} ({click.style(ver, fg='blue')})"
+        pkg_str = f"{click.style(name, fg='cyan' if pip else 'green')} ({click.style(ver, fg='blue')})"
         print(click.style("   spec:", fg="bright_white"), f"Removed {pkg_str} from dependencies", file=sys.stderr)
         return True
 
+    lock_conda = not pip
     if pip:
         if "pip" not in dep_names:
-            _add_pkg("pip", pip=False)
+            lock_conda = _add_pkg("pip", pip=False)
         pip_deps = None
         for spec in deps:
             if isinstance(spec, OrderedDict) and "pip" in spec:
@@ -410,7 +438,7 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
     save_spec_file()
     if update:
         print(file=sys.stderr)
-        env_lock(conda=not pip)
+        env_lock(conda=lock_conda)
 
     if install is None:
         install = env_prefix().exists()
@@ -421,46 +449,43 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
         env_install(prune=prune, force=force, show=show)
 
 
-def env_show(query: List[str] = [], deps: bool = False, only_return: bool = False):
+def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = None, only_return: bool = False):
     out = run_exe(["list", "--prefix", env_prefix(), *query, "--json"])
     if not out:
         print("No results", file=sys.stderr)
         exit(1)
-    res = json.loads(out)
 
     conda_names, pip_names = spec_package_names()
-    data = {}
-    for pkg_info in res:
-        name, version, channel = pkg_info["name"], pkg_info["version"], pkg_info["channel"]
-        if not deps and not (name in conda_names or name in pip_names):
-            continue
 
-        fg, warning = None, ""
-        if channel == "pypi":
-            if name in pip_names:
-                fg = "cyan"
-            else:
-                warning = "WARNING: implicit pip dependency"
+    pkg_infos = json.loads(out)
+    if pip is False:
+        pkg_infos = [x for x in pkg_infos if x["channel"] != "pypi"]
+    if pip is True:
+        pkg_infos = [x for x in pkg_infos if x["channel"] == "pypi"]
+    elif not deps:
+        pkg_infos = [x for x in pkg_infos if x["name"] in conda_names or x["name"] in pip_names]
+
+    if only_return:
+        return pkg_infos
+
+    cols = ["name", "version", "channel"]
+    pkg_str_lengths = _pkg_str_lengths(pkg_infos, cols) if not only_return else {}
+
+    for pkg_info in pkg_infos:
+        name = pkg_info["name"]
+
+        warning = None
+        if pkg_info["channel"] == "pypi":
             if name in conda_names:
                 warning = "WARNING: conda dependency overriden by pip"
-        else:
-            if name in conda_names:
-                fg = "green"
+            elif name not in pip_names:
+                warning = "WARNING: implicit pip dependency"
+        line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
+        if warning:
+            line = f"{line}  {click.style(warning, fg='yellow')}"
+        print(line)
 
-        data[name] = {
-            "version": version,
-            "channel": channel,
-        }
-        if not only_return:
-            name_fmt = click.style(name.ljust(20), fg=fg)
-            version_fmt = click.style(version.ljust(12), fg="blue")
-            channel_fmt = click.style(channel.ljust(14), fg="cyan" if channel == "pypi" else "bright_white")
-            warning_str = click.style(warning.ljust(20), fg="yellow")
-
-            line = f"{name_fmt} {version_fmt} {channel_fmt} {warning_str}"
-            print(line)
-
-    return data
+    return pkg_infos
 
 
 def conda_search(pkg: str,
@@ -499,23 +524,19 @@ def conda_pkg_info(pkg: str, channels: Optional[List[str]] = None):
 def env_search(pkg: str, platform: Optional[str], limit: int):
     platforms = [platform] if platform else spec_platforms()
 
+    cols = ["name", "version", "build", "channel"]
+
     for i, platform in enumerate(platforms, start=1):
         if i > 1:
             print()
         pkg_infos = conda_search(pkg, platform=platform)
         if limit > 0:
             pkg_infos = pkg_infos[-limit:]
-        click.secho(f"# platform: {click.style(platform, bold=True)}", fg="cyan")
+        click.secho(f"# platform: {click.style(platform, bold=True)}", fg="magenta")
         if not pkg_infos:
             click.secho("No results", fg="yellow")
             exit(1)
 
+        pkg_str_lengths = _pkg_str_lengths(pkg_infos, cols)
         for j, pkg_info in enumerate(pkg_infos, start=1):
-            bold = j == len(pkg_infos)
-            name_fmt = click.style(pkg_info["name"].ljust(20), fg="green", bold=bold)
-            version_fmt = click.style(pkg_info["version"].ljust(12), fg="blue", bold=bold)
-            build_fmt = click.style(pkg_info["build"].ljust(16), fg="bright_white", bold=bold)
-            channel_fmt = click.style(pkg_info["channel"].ljust(14), fg="bright_white", bold=bold)
-
-            line = f"{name_fmt} {version_fmt} {build_fmt} {channel_fmt}"
-            print(line)
+            print(_format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths, bold=j == len(pkg_infos)))
