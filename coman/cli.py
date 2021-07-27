@@ -5,15 +5,11 @@ from pathlib import Path
 from typing import List, Optional
 
 import click
-from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
-                                 micromamba_executables, safe_next)
 
-from coman.env import change_spec, conda_pkg_info, env_install, env_lock, env_python_exe, env_python_version, env_search, env_show, env_uninstall
-from coman.spec import conda_lock_file, conda_outdated, pip_outdated, spec_file
-from coman.system import (MIN_CONDA_VERSION, MIN_MAMBA_VERSION, conda_exe, env_name, env_prefix, envs_dir,
-                          is_micromamba, system_exe, system_platform)
-
-from ._version import __version__
+from coman.env import (change_spec, env_info, env_init, env_install, env_lock,
+                       env_python_exe, env_search, env_show, env_uninstall)
+from coman.system import (conda_exe, env_name, env_prefix, is_micromamba,
+                          micromamba_exe, system_exe, system_platform)
 
 
 class NaturalOrderGroup(click.Group):
@@ -35,98 +31,23 @@ def cli(mamba: Optional[bool], micromamba: Optional[bool], conda: Optional[bool]
 @click.option("--name", default=False, is_flag=True)
 @click.option("--prefix", default=False, is_flag=True)
 @click.option("--platform", default=False, is_flag=True)
-@click.option("--exe", default=False, is_flag=True)
-@click.option("--python", default=False, is_flag=True)
-def info(name: bool, prefix: bool, platform: bool, exe: bool, python: bool):
+@click.option("--conda-exe", default=False, is_flag=True)
+@click.option("--python-exe", default=False, is_flag=True)
+def info(name: bool, prefix: bool, platform: bool, conda_exe: bool, python_exe: bool):
     """
     Info about environment and current system
     """
-    from ensureconda.api import (determine_conda_version, determine_mamba_version, determine_micromamba_version)
-    from ensureconda.installer import install_conda_exe, install_micromamba
-
     if name:
         return print(env_name())
     if prefix:
         return print(env_prefix())
     if platform:
         return print(system_platform())
-    if exe:
-        return print(system_exe())
-    if python:
-        return print(env_python_exe())
-
-    sys_prefix = env_prefix()
-    sys_platform = system_platform()
-
-    print("Current environment")
-    sys_status = "up-to-date"
-    if not spec_file().exists():
-        sys_status = "no environment.yml (run `coman init`)"
-    elif not conda_lock_file().exists():
-        sys_status = f"no lock file for this platform (run `coman lock`)"
-    elif not sys_prefix.exists():
-        sys_status = "not installed (run `coman install`)"
-    elif conda_outdated():
-        sys_status = "env outdated (run `coman install`)"
-    elif pip_outdated():
-        sys_status = "pip outdated (run `coman install`)"
-
-    print(f"> Prefix:   {sys_prefix}")
-    print(f"> Platform: {sys_platform}")
-    print(f"> Status:   {sys_status}")
-    if sys_prefix.exists():
-        print(f"> Python:   {env_python_version()}")
-
-    print("\nCoMan")
-    print(f"> Version:  {__version__}")
-    py = sys.version_info
-    print(f"> Python:   {py.major}.{py.minor}.{py.micro}")
-    print(f"> Envs dir: {envs_dir()}")
-
-    print("\nConda")
-
-    # Mamba
-    mamba_exe = safe_next(mamba_executables())
-    mamba_ver = "n/a"
-    if mamba_exe:
-        mamba_ver = determine_mamba_version(mamba_exe)
-        mamba_state = "unsupported" if mamba_ver < MIN_MAMBA_VERSION else "ok"
-        mamba_ver = f"{mamba_ver} ({mamba_state}) [{mamba_exe}]"
-    print(f"> Mamba:            {mamba_ver}")
-
-    # Micromamba
-    micromamba_exe = safe_next(micromamba_executables())
-    micromamba_ver = determine_micromamba_version(micromamba_exe) if micromamba_exe else None
-    micromamba_state = "ok"
-    if not micromamba_ver or micromamba_ver < MIN_MAMBA_VERSION:
-        micromamba_exe = install_micromamba()
-        micromamba_ver = determine_micromamba_version(micromamba_exe) if micromamba_exe else None
-        micromamba_state = "unsupported" if micromamba_ver and micromamba_ver < MIN_MAMBA_VERSION else "ok"
-    micromamba_ver = f"{micromamba_ver} ({micromamba_state}) [{micromamba_exe}]" if micromamba_ver else "n/a"
-    print(f"> Micromamba:       {micromamba_ver}")
-
-    # Conda
-    conda_exe = safe_next(conda_executables())
-    conda_ver = "n/a"
     if conda_exe:
-        conda_ver = determine_conda_version(conda_exe)
-        conda_state = "unsupported" if conda_ver < MIN_CONDA_VERSION else "ok"
-        conda_ver = f"{conda_ver} ({conda_state}) [{conda_exe}]"
-    print(f"> Conda:            {conda_ver}")
-
-    # Conda standalone
-    try:
-        condastandalone_exe = safe_next(conda_standalone_executables())
-        condastandalone_ver = determine_conda_version(condastandalone_exe) if condastandalone_exe else None
-        condastandalone_state = "ok"
-        if not condastandalone_ver or condastandalone_ver < MIN_CONDA_VERSION:
-            condastandalone_exe = install_conda_exe()
-            condastandalone_ver = determine_conda_version(condastandalone_exe) if condastandalone_exe else None
-            condastandalone_state = "unsupported" if condastandalone_ver and condastandalone_ver < MIN_CONDA_VERSION else "ok"
-        condastandalone_ver = f"{condastandalone_ver} ({condastandalone_state}) [{condastandalone_exe}]" if condastandalone_ver else "n/a"
-    except IndexError:
-        condastandalone_ver = "n/a"
-    print(f"> Conda standalone: {condastandalone_ver}")
+        return print(system_exe())
+    if python_exe:
+        return print(env_python_exe())
+    env_info()
 
 
 @cli.command()
@@ -134,18 +55,7 @@ def init():
     """
     Initialize a new environment.yml
     """
-    if spec_file().exists():
-        print(f"Specification file `{spec_file()}` already exists", file=sys.stderr)
-        exit(1)
-
-    print("Creating `environment.yml`")
-    pkg_info = conda_pkg_info("python", ["conda-forge"])
-    pkg_str = f"{pkg_info['name']} >={pkg_info['version']}"
-
-    with open(spec_file(), "w") as f:
-        f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg_str}\n")
-
-    env_lock()
+    env_init()
 
 
 @cli.command()
@@ -294,7 +204,7 @@ def shell(install: bool):
             print(f"conda activate \"{env_prefix()}\"")
             exit(0)
 
-    exe = next(micromamba_executables())
+    exe = micromamba_exe()
     print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
     print(f"eval \"$('{exe}' shell hook -s {shell})\";")
     print(f"micromamba activate \"{env_prefix()}\"")

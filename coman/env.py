@@ -12,14 +12,15 @@ from typing import Any, Dict, Iterator, List, Optional
 import click
 
 import ruamel.yaml as yaml
-
 from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser import LockSpecification
 
 from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_file, pip_lock_hash,
                         pip_outdated, require_spec_file, spec_channels, spec_file, spec_package_names,
                         spec_pip_requirements, spec_platforms)
-from coman.system import (conda_exe, env_prefix, pypi_pkg_info, run_exe, system_exe)
+from coman.system import (conda_exe, conda_info, env_prefix, envs_dir, pypi_pkg_info, run_exe, system_exe,
+                          system_platform)
+from coman._version import __version__
 
 _COL_COLORS = {
     "name": "green",
@@ -73,6 +74,39 @@ def parse_environment_file(spec_file: Path, platform: str) -> LockSpecification:
     channels = env_yaml_data.get("channels", [])
 
     return LockSpecification(specs=specs, channels=channels, platform=platform)
+
+
+def env_info():
+    sys_prefix = env_prefix()
+    sys_platform = system_platform()
+
+    print("Current environment")
+    sys_status = "up-to-date"
+    if not spec_file().exists():
+        sys_status = "no environment.yml (run `coman init`)"
+    elif not conda_lock_file().exists():
+        sys_status = f"no lock file for this platform (run `coman lock`)"
+    elif not sys_prefix.exists():
+        sys_status = "not installed (run `coman install`)"
+    elif conda_outdated():
+        sys_status = "env outdated (run `coman install`)"
+    elif pip_outdated():
+        sys_status = "pip outdated (run `coman install`)"
+
+    print(f"> Prefix:   {sys_prefix}")
+    print(f"> Platform: {sys_platform}")
+    print(f"> Status:   {sys_status}")
+    if sys_prefix.exists():
+        print(f"> Python:   {env_python_version()}")
+
+    print("\nCoMan")
+    print(f"> Version:  {__version__}")
+    py = sys.version_info
+    print(f"> Python:   {py.major}.{py.minor}.{py.micro}")
+    print(f"> Envs dir: {envs_dir()}")
+
+    print("\nConda")
+    conda_info()
 
 
 def _env_lock_conda():
@@ -540,3 +574,18 @@ def env_search(pkg: str, platform: Optional[str], limit: int):
         pkg_str_lengths = _pkg_str_lengths(pkg_infos, cols)
         for j, pkg_info in enumerate(pkg_infos, start=1):
             print(_format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths, bold=j == len(pkg_infos)))
+
+
+def env_init():
+    if spec_file().exists():
+        print(f"Specification file `{spec_file()}` already exists", file=sys.stderr)
+        exit(1)
+
+    print("Creating `environment.yml`")
+    pkg_info = conda_pkg_info("python", ["conda-forge"])
+    pkg_str = f"{pkg_info['name']} >={pkg_info['version']}"
+
+    with open(spec_file(), "w") as f:
+        f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg_str}\n")
+
+    env_lock()

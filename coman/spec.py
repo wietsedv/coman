@@ -1,4 +1,3 @@
-from platform import platform
 from coman.system import env_prefix_conda_hash, env_prefix_pip_hash, system_platform
 import re
 from pathlib import Path
@@ -35,17 +34,6 @@ def spec_platforms() -> List[str]:
                     fg="yellow",
                     file=sys.stderr)
     return platforms
-
-
-# def spec_includes_pip():
-#     with open(spec_file()) as f:
-#         env = yaml.safe_load(f)
-
-#     for pkg in env["dependencies"]:
-#         if type(pkg) == str and pkg.split(" ")[0] == "pip":
-#             print(pkg["pip"])
-#             return True
-#     return False
 
 
 def spec_pip_requirements():
