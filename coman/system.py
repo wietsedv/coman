@@ -7,6 +7,7 @@ from distutils.version import LooseVersion
 from hashlib import md5
 from pathlib import Path
 from typing import Any, List, Optional
+import click
 
 from ensureconda.api import (determine_conda_version, determine_mamba_version, determine_micromamba_version)
 from ensureconda.installer import extract_files_from_conda_package, install_micromamba, request_url_with_retry
@@ -30,6 +31,9 @@ def install_conda_exe() -> Optional[Path]:
         if file_info["attrs"]["subdir"] == system_platform():
             candidates.append(file_info)
 
+    if len(candidates) == 0:
+        return
+
     chosen = max(candidates,
                  key=lambda attrs: (
                      LooseVersion(attrs["version"]),
@@ -50,8 +54,10 @@ def install_conda_exe() -> Optional[Path]:
     )
 
 
-def is_conda(exe: Path, standalone: bool = True) -> bool:
+def is_conda(exe: Path, standalone: Optional[bool] = None) -> bool:
     if standalone:
+        return exe.name == "conda_standalone"
+    if standalone is None:
         return exe.name in ["conda", "conda_standalone"]
     return exe.name == "conda"
 
@@ -65,24 +71,25 @@ def is_micromamba(exe: Optional[Path] = None) -> bool:
     return exe is not None and exe.name == "micromamba"
 
 
-def conda_exe(standalone: bool = True, install: bool = True):
+def conda_exe(standalone: Optional[bool] = None, install: bool = True):
     global _exe
     if _exe and is_conda(_exe, standalone=standalone):
         return _exe
 
-    for exe in conda_executables():
-        if determine_conda_version(exe) >= MIN_CONDA_VERSION:
-            return Path(exe)
+    if standalone is not True:
+        for exe in conda_executables():
+            if determine_conda_version(exe) >= MIN_CONDA_VERSION:
+                return Path(exe)
 
-    if standalone:
+    if standalone is not False:
         for exe in conda_standalone_executables():
             if determine_conda_version(exe) >= MIN_CONDA_VERSION:
                 return Path(exe)
 
-    if install:
-        exe = install_conda_exe()
-        if exe and determine_conda_version(exe) >= MIN_CONDA_VERSION:
-            return Path(exe)
+        if install:
+            exe = install_conda_exe()
+            if exe and determine_conda_version(exe) >= MIN_CONDA_VERSION:
+                return Path(exe)
 
 
 def mamba_exe():
@@ -110,13 +117,17 @@ def micromamba_exe(install: bool = True):
             return Path(exe)
 
 
-def system_exe(conda: Optional[bool] = None, mamba: Optional[bool] = None, micromamba: Optional[bool] = None) -> Path:
+def system_exe(conda: Optional[bool] = None,
+               conda_standalone: Optional[bool] = None,
+               mamba: Optional[bool] = None,
+               micromamba: Optional[bool] = None) -> Path:
     global _exe
     if _exe:
         assert conda is None and mamba is None and micromamba is None
         return _exe
 
-    if conda or mamba or micromamba:
+    # conda_standalone can stay None => optional
+    if conda or conda_standalone or mamba or micromamba:
         conda = conda or False
         mamba = mamba or False
         micromamba = micromamba or False
@@ -124,14 +135,17 @@ def system_exe(conda: Optional[bool] = None, mamba: Optional[bool] = None, micro
         conda, mamba, micromamba = True, True, True
 
     if not _exe and conda:
-        _exe = conda_exe()
+        _exe = conda_exe(standalone=False)
+    if not _exe and conda_standalone is not False:
+        _exe = conda_exe(standalone=True)
     if not _exe and mamba:
         _exe = mamba_exe()
     if not _exe and micromamba:
         _exe = micromamba_exe()
 
     if not _exe:
-        raise RuntimeError("No valid conda installation was found")
+        click.secho("No valid Conda executable was found", fg="red")
+        exit(1)
     return _exe
 
 

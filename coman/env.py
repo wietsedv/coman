@@ -581,11 +581,17 @@ def env_init():
         print(f"Specification file `{spec_file()}` already exists", file=sys.stderr)
         exit(1)
 
-    print("Creating `environment.yml`")
+    print(
+        click.style("   init:", fg="bright_white"),
+        "Creating",
+        click.style("environment.yml", fg="green"),
+        file=sys.stderr,
+    )
     pkg_info = conda_pkg_info("python", ["conda-forge"])
     pkg_str = f"{pkg_info['name']} >={pkg_info['version']}"
 
     with open(spec_file(), "w") as f:
         f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg_str}\n")
 
+    print()
     env_lock()

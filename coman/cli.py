@@ -18,12 +18,13 @@ class NaturalOrderGroup(click.Group):
 
 @click.group(cls=NaturalOrderGroup)
 @click.option('--conda/--no-conda', default=None)
+@click.option('--conda-standalone/--no-conda-standalone', default=None)
 @click.option('--mamba/--no-mamba', default=None)
 @click.option('--micromamba/--no-micromamba', default=None)
 @click.version_option()
-def cli(conda: Optional[bool], mamba: Optional[bool], micromamba: Optional[bool]):
-    if conda or mamba or micromamba:
-        system_exe(conda, mamba, micromamba)
+def cli(conda: Optional[bool], conda_standalone: Optional[bool], mamba: Optional[bool], micromamba: Optional[bool]):
+    if conda or conda_standalone or mamba or micromamba:
+        system_exe(conda, conda_standalone, mamba, micromamba)
 
 
 @cli.command()
@@ -158,6 +159,7 @@ def show(query: List[str], install: bool, deps: bool, pip: Optional[bool]):
     """
     if install:
         env_install(quiet=True)
+        print()
     env_show(query, deps, pip)
 
 
