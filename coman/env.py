@@ -252,7 +252,6 @@ def _env_install_pip():
         "--no-deps",
         "--disable-pip-version-check",
         "--no-input",
-        "--quiet",
     ]
     res = subprocess.run(args)
     if res.returncode != 0:
@@ -299,11 +298,14 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
     if prune is None:
         prune = (use_pip and conda_changed) or pip_changed
 
+    installed = False
+
     # Conda
     if force or prune or conda_changed:
         _env_install_conda(prune)
         with open(env_prefix() / "conda_hash.txt", "w") as f:
             f.write(conda_hash)
+            installed = True
     elif not quiet:
         print(
             click.style("install:", fg="bright_white"),
@@ -319,6 +321,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
             _env_install_pip()
             with open(pip_hash_path, "w") as f:
                 f.write(pip_hash)
+            installed = True
         elif not quiet:
             print(
                 click.style("install:", fg="bright_white"),
@@ -329,11 +332,13 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
     elif pip_hash_path.exists():
         os.remove(pip_hash_path)
 
+    if not installed:
+        return
+
+    print()
     if show:
         new_pkgs = env_show(deps=True, only_return=True)
         if new_pkgs != old_pkgs:
-            print()
-
             new_pkg_names = [pkg_info["name"] for pkg_info in new_pkgs]
             old_pkg_names = [pkg_info["name"] for pkg_info in old_pkgs]
 
@@ -375,6 +380,8 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
                       "Installed",
                       line,
                       file=sys.stderr)
+
+            print()
 
 
 def env_uninstall():

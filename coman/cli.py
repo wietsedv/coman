@@ -1,7 +1,6 @@
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import List, Optional
 
 import click
@@ -149,6 +148,14 @@ def uninstall():
 
 
 @cli.command()
+@click.argument("pkg")
+@click.option("--platform", default=None)
+@click.option("--limit", type=int, default=5)
+def search(pkg: str, platform: Optional[str], limit: int):
+    env_search(pkg, platform, limit)
+
+
+@cli.command()
 @click.argument("query", nargs=-1)
 @click.option("--install/--no-install", default=True)
 @click.option("--deps/--no-deps", default=False, help="Include installed dependencies of your packages.")
@@ -159,7 +166,6 @@ def show(query: List[str], install: bool, deps: bool, pip: Optional[bool]):
     """
     if install:
         env_install(quiet=True)
-        print()
     env_show(query, deps, pip)
 
 
@@ -184,8 +190,10 @@ def run(args, install: bool):
 
 
 @cli.command()
+@click.option("--hook", default=False, is_flag=True)
 @click.option("--install/--no-install", default=True)
-def shell(install: bool):
+@click.option("--quiet", default=False, is_flag=True)
+def shell(hook: bool, install: bool, quiet: bool):
     """
     Activate the environment with `eval $(coman shell)`
 
@@ -194,29 +202,40 @@ def shell(install: bool):
     if install:
         env_install(quiet=True)
 
-    shell = Path(os.environ["SHELL"]).name
+    from shellingham import detect_shell
 
-    # Currently only works with conda or micromamba
-    if not is_micromamba():
-        exe = conda_exe(standalone=False)
-        if exe:
-            print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
-            print(f"eval \"$('{exe}' shell.{shell} hook)\";")
-            print(f"conda activate \"{env_prefix()}\"")
+    shell_name, shell_path = detect_shell()
+
+    if hook:
+        # Currently only works with conda or micromamba
+        if not is_micromamba():
+            exe = conda_exe(standalone=False)
+            if exe:
+                if hook:
+                    if not quiet:
+                        print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
+                    print(f"eval \"$('{exe}' shell.{shell_name} hook)\" && conda activate \"{env_prefix()}\"")
+                    exit(0)
+
+        exe = micromamba_exe()
+        if hook:
+            if not quiet:
+                print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
+            print(f"eval \"$('{exe}' shell hook -s {shell_name})\" && micromamba activate \"{env_prefix()}\"")
             exit(0)
 
-    exe = micromamba_exe()
-    print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
-    print(f"eval \"$('{exe}' shell hook -s {shell})\";")
-    print(f"micromamba activate \"{env_prefix()}\"")
+    else:
+        import pexpect
 
+        c = pexpect.spawn(shell_path, ["-i"])
+        if shell_name == "zsh":
+            c.setecho(False)
 
-@cli.command()
-@click.argument("pkg")
-@click.option("--platform", default=None)
-@click.option("--limit", type=int, default=5)
-def search(pkg: str, platform: Optional[str], limit: int):
-    env_search(pkg, platform, limit)
+        shell_hook = f"eval $({os.path.abspath(sys.argv[0])} shell --hook --quiet)"
+        c.sendline(shell_hook)
+        c.interact(escape_character=None)
+        c.close()
+        exit(c.exitstatus)
 
 
 if __name__ == "__main__":

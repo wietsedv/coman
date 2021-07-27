@@ -172,9 +172,9 @@ def conda_root():
     if _conda_root:
         return _conda_root
 
-    prefix = os.getenv("CONDA_PREFIX", os.getenv("MAMBA_ROOT_PREFIX"))
-    if prefix:
-        _conda_root = Path(prefix)
+    root = os.getenv("CONDA_ROOT", os.getenv("MAMBA_ROOT_PREFIX"))
+    if root:
+        _conda_root = Path(root)
         return _conda_root
 
     p = run_exe(["info", "--json"], check=False)
