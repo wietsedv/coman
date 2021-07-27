@@ -42,7 +42,14 @@ def spec_pip_requirements():
 
     for pkg in env["dependencies"]:
         if isinstance(pkg, dict) and "pip" in pkg:
-            return "\n".join(pkg["pip"])
+            pip_pkgs = []
+            for pkg in pkg["pip"]:
+                _, ver = pkg.split(" ")
+                if ver.startswith("http"):
+                    pip_pkgs.append(ver)
+                else:
+                    pip_pkgs.append(pkg)
+            return "\n".join(pip_pkgs)
     return None
 
 
@@ -99,6 +106,36 @@ def pip_lock_hash() -> Optional[str]:
             if m:
                 return m.group(1)
         raise RuntimeError("Cannot find env_hash in pip lock file")
+
+
+def pip_lock_comments():
+    lock_path = pip_lock_file()
+    if not lock_path.exists():
+        return {}
+
+    comments = {}
+    with open(lock_path) as f:
+        name, comment = None, ""
+        for line in f:
+            if name is not None:
+                if line.startswith("    --hash="):
+                    continue
+                if line.startswith("    # "):
+                    comment += " " + line[6:].strip()
+                    continue
+                if comment:
+                    comments[name] = comment
+                name = None
+            if name is None:
+                if line[0] in "#\n":
+                    continue
+                if "==" in line:
+                    name, comment = line.split("==")[0], ""
+                    continue
+        if comment:
+            comments[name] = comment
+
+    return comments
 
 
 def pip_outdated(pip_hash: Optional[str] = None):

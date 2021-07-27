@@ -15,9 +15,9 @@ import ruamel.yaml as yaml
 from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser import LockSpecification
 
-from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_file, pip_lock_hash,
-                        pip_outdated, require_spec_file, spec_channels, spec_file, spec_package_names,
-                        spec_pip_requirements, spec_platforms)
+from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_comments,
+                        pip_lock_file, pip_lock_hash, pip_outdated, require_spec_file, spec_channels, spec_file,
+                        spec_package_names, spec_pip_requirements, spec_platforms)
 from coman.system import (conda_exe, conda_info, conda_root, env_prefix, envs_dir, pkgs_dir, pypi_pkg_info, run_exe,
                           system_exe, system_platform)
 from coman._version import __version__
@@ -28,7 +28,8 @@ _COL_COLORS = {
     "old_version": "red",
     "build": "yellow",
     "channel": "bright_white",
-    "pypi": "cyan"
+    "pypi": "cyan",
+    "comment": "white"
 }
 
 
@@ -260,7 +261,7 @@ def _env_install_pip():
 
 
 def _pkg_str_lengths(pkg_infos: List[Dict[str, Any]], cols: List[str]):
-    return {col: max(map(lambda x: len(x[col]), pkg_infos)) for col in cols}
+    return {col: max(map(lambda x: len(x.get(col, "")), pkg_infos)) for col in cols}
 
 
 def _format_pkg_str(pkg_info: dict, cols: List[str], pkg_str_lengths: Dict[str, int], bold: bool = False):
@@ -401,27 +402,31 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
 
     def _add_pkg(pkg: str, pip: bool):
         if pip:
-            pkg_info = pypi_pkg_info(pkg)
+            if "@" in pkg:
+                name, ver = pkg.split("@")
+                pkg_info = {"name": name, "version": ver}
+                pkg_spec = f"{name} {ver}"
+            else:
+                pkg_info = pypi_pkg_info(pkg)
+                name, ver = pkg_info["name"], pkg_info["version"]
+                pkg_spec = f"{name} >={ver}"
         else:
             pkg_info = conda_pkg_info(pkg, spec_data["channels"])
-
-        name = pkg_info["name"]
-        pkg = f"{name} >={pkg_info['version']}"
-        channel = pkg_info["channel"]
+            name, ver = pkg_info["name"], pkg_info["version"]
+            pkg_spec = f"{name} >={ver}"
 
         i = len(deps)
         if name in dep_names:
             i = dep_names.index(name)
-            if deps[i] == pkg:
+            if deps[i] == pkg_spec:
                 return False
             deps.pop(i)
 
-        deps.insert(i, pkg)
+        deps.insert(i, pkg_spec)
         dep_names.insert(i, name)
 
-        name, ver = pkg.split()
-        pkg_str = f"{click.style(name, fg='cyan' if pip else 'green')} ({click.style(ver, fg='blue')})"
-        print(click.style("   spec:", fg="bright_white"), f"Added {pkg_str} to dependencies", file=sys.stderr)
+        pkg_fmt = f"{click.style(name, fg='cyan' if pip else 'green')} ({click.style(ver, fg='blue')})"
+        print(click.style("   spec:", fg="bright_white"), f"Added {pkg_fmt} to dependencies", file=sys.stderr)
         return True
 
     def _remove_pkg(pkg: str):
@@ -500,13 +505,16 @@ def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = No
         pkg_infos = [x for x in pkg_infos if x["channel"] != "pypi"]
     if pip is True:
         pkg_infos = [x for x in pkg_infos if x["channel"] == "pypi"]
+        pip_comments = pip_lock_comments()
+        for pkg_info in pkg_infos:
+            pkg_info["comment"] = pip_comments.get(pkg_info["name"], "")
     elif not deps:
         pkg_infos = [x for x in pkg_infos if x["name"] in conda_names or x["name"] in pip_names]
 
     if only_return:
         return pkg_infos
 
-    cols = ["name", "version", "channel"]
+    cols = ["name", "version", "channel", "comment"]
     pkg_str_lengths = _pkg_str_lengths(pkg_infos, cols) if not only_return else {}
 
     for pkg_info in pkg_infos:
@@ -516,8 +524,8 @@ def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = No
         if pkg_info["channel"] == "pypi":
             if name in conda_names:
                 warning = "WARNING: conda dependency overriden by pip"
-            elif name not in pip_names:
-                warning = "WARNING: implicit pip dependency"
+            # elif name not in pip_names:
+            #     warning = "WARNING: implicit pip dependency"
         line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
         if warning:
             line = f"{line}  {click.style(warning, fg='yellow')}"
