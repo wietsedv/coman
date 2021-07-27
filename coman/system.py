@@ -18,7 +18,7 @@ MIN_CONDA_VERSION = LooseVersion("4.10")
 MIN_MAMBA_VERSION = LooseVersion("0.15")
 
 _exe: Optional[Path] = None
-_envs_dir = None
+_conda_root = None
 _env_name = None
 
 
@@ -126,17 +126,17 @@ def system_exe(conda: Optional[bool] = None,
         assert conda is None and mamba is None and micromamba is None
         return _exe
 
-    # conda_standalone can stay None => optional
     if conda or conda_standalone or mamba or micromamba:
         conda = conda or False
+        conda_standalone = conda_standalone or False
         mamba = mamba or False
         micromamba = micromamba or False
     else:
-        conda, mamba, micromamba = True, True, True
+        conda, conda_standalone, mamba, micromamba = True, True, True, True
 
     if not _exe and conda:
         _exe = conda_exe(standalone=False)
-    if not _exe and conda_standalone is not False:
+    if not _exe and conda_standalone:
         _exe = conda_exe(standalone=True)
     if not _exe and mamba:
         _exe = mamba_exe()
@@ -144,46 +144,61 @@ def system_exe(conda: Optional[bool] = None,
         _exe = micromamba_exe()
 
     if not _exe:
-        click.secho("No valid Conda executable was found", fg="red")
+        click.secho("No valid Conda executable was found", fg="red", file=sys.stderr)
         exit(1)
+
+    envs_dir()
+    pkgs_dir()
     return _exe
 
 
-def run_exe(args: List[Any], check: bool = True, exe: Optional[Path] = None):
+def run_exe(args: List[Any], capture: bool = True, check: bool = True, exe: Optional[Path] = None):
     exe = exe or system_exe()
-    args = [str(a) for a in [exe, *args]]
+
+    args = [exe, *args]
+    if not capture:
+        return subprocess.run(args, encoding="utf-8")
+
     p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
     if check and p.returncode != 0:
         if p.stdout:
             print(p.stdout.strip(), file=sys.stderr)
         print(p.stderr.strip(), file=sys.stderr)
-        return
-    return p.stdout
+    return p
+
+
+def conda_root():
+    global _conda_root
+    if _conda_root:
+        return _conda_root
+
+    prefix = os.getenv("CONDA_PREFIX", os.getenv("MAMBA_ROOT_PREFIX"))
+    if prefix:
+        _conda_root = Path(prefix)
+        return _conda_root
+
+    p = run_exe(["info", "--json"], check=False)
+    if p.returncode == 0:
+        res = json.loads(p.stdout)
+        _conda_root = Path(res["default_prefix"])
+        return _conda_root
+
+    _conda_root = Path(os.path.expanduser("~/conda"))
+    return _conda_root
 
 
 def envs_dir():
-    global _envs_dir
-    if _envs_dir:
-        return _envs_dir
+    p = os.getenv("CONDA_ENVS_PATH")
+    if not p:
+        p = os.environ["CONDA_ENVS_PATH"] = f"{conda_root()}/envs"
+    return Path(p)
 
-    root = os.getenv("COMAN_ENVS_ROOT")
-    if root:
-        _envs_dir = Path(root)
-        return _envs_dir
 
-    conda_prefix = os.getenv("CONDA_PREFIX", os.getenv("MAMBA_ROOT_PREFIX"))
-    if conda_prefix:
-        _envs_dir = Path(conda_prefix) / "envs"
-        return _envs_dir
-
-    out = run_exe(["info", "--json"])
-    if not out:
-        print("Unable to resolve environments directory", file=sys.stderr)
-        exit(1)
-    res = json.loads(out)
-    _envs_dir = Path(res["envs_dirs"][0])
-
-    return _envs_dir
+def pkgs_dir():
+    p = os.getenv("CONDA_PKGS_DIRS")
+    if not p:
+        p = os.environ["CONDA_PKGS_DIRS"] = f"{conda_root()}/pkgs"
+    return Path(p)
 
 
 def env_name():

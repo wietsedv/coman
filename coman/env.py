@@ -18,8 +18,8 @@ from conda_lock.src_parser import LockSpecification
 from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_file, pip_lock_hash,
                         pip_outdated, require_spec_file, spec_channels, spec_file, spec_package_names,
                         spec_pip_requirements, spec_platforms)
-from coman.system import (conda_exe, conda_info, env_prefix, envs_dir, pypi_pkg_info, run_exe, system_exe,
-                          system_platform)
+from coman.system import (conda_exe, conda_info, conda_root, env_prefix, envs_dir, pkgs_dir, pypi_pkg_info, run_exe,
+                          system_exe, system_platform)
 from coman._version import __version__
 
 _COL_COLORS = {
@@ -77,33 +77,33 @@ def parse_environment_file(spec_file: Path, platform: str) -> LockSpecification:
 
 
 def env_info():
-    sys_prefix = env_prefix()
-    sys_platform = system_platform()
-
     print("Current environment")
     sys_status = "up-to-date"
     if not spec_file().exists():
         sys_status = "no environment.yml (run `coman init`)"
     elif not conda_lock_file().exists():
         sys_status = f"no lock file for this platform (run `coman lock`)"
-    elif not sys_prefix.exists():
+    elif not env_prefix().exists():
         sys_status = "not installed (run `coman install`)"
     elif conda_outdated():
         sys_status = "env outdated (run `coman install`)"
     elif pip_outdated():
         sys_status = "pip outdated (run `coman install`)"
 
-    print(f"> Prefix:   {sys_prefix}")
-    print(f"> Platform: {sys_platform}")
+    print(f"> Prefix:   {env_prefix()}")
+    print(f"> Platform: {system_platform()}")
     print(f"> Status:   {sys_status}")
-    if sys_prefix.exists():
+    if env_prefix().exists():
         print(f"> Python:   {env_python_version()}")
 
     print("\nCoMan")
     print(f"> Version:  {__version__}")
     py = sys.version_info
     print(f"> Python:   {py.major}.{py.minor}.{py.micro}")
+
+    print(f"> Root:     {conda_root()}")
     print(f"> Envs dir: {envs_dir()}")
+    print(f"> Pkgs dir: {pkgs_dir()}")
 
     print("\nConda")
     conda_info()
@@ -218,15 +218,17 @@ def _env_install_conda(prune: bool):
         click.style("<create>", fg="red") if prune else click.style("<update>", fg="green"),
         file=sys.stderr,
     )
+
     args = [
-        "create" if prune or not prefix.exists() else "update",
+        "create" if prune or not prefix.exists() else "install",
         "--file",
         lock_path,
         "--prefix",
         prefix,
         "--yes",
     ]
-    if not run_exe(args):
+    p = run_exe(args, capture=False)
+    if p.returncode != 0:
         click.secho(f"\nCould not install {lock_path} into {prefix}", fg="red", file=sys.stderr)
         exit(1)
 
@@ -354,7 +356,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
                 line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
                 print(click.style("install:", fg="bright_white"),
                       click.style("-", fg="red"),
-                      "Removed",
+                      "  Removed",
                       line,
                       file=sys.stderr)
 
@@ -362,7 +364,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
                 line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
                 print(click.style("install:", fg="bright_white"),
                       click.style("*", fg="yellow"),
-                      "Updated",
+                      "  Updated",
                       line,
                       file=sys.stderr)
 
@@ -370,7 +372,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
                 line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
                 print(click.style("install:", fg="bright_white"),
                       click.style("+", fg="green"),
-                      "  Added",
+                      "Installed",
                       line,
                       file=sys.stderr)
 
@@ -412,12 +414,7 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
 
         name, ver = pkg.split()
         pkg_str = f"{click.style(name, fg='cyan' if pip else 'green')} ({click.style(ver, fg='blue')})"
-        print(
-            click.style("   spec:", fg="bright_white"),
-            f"Added {pkg_str} to dependencies",
-            click.style(f"[{channel}]", fg="bright_white"),
-            file=sys.stderr,
-        )
+        print(click.style("   spec:", fg="bright_white"), f"Added {pkg_str} to dependencies", file=sys.stderr)
         return True
 
     def _remove_pkg(pkg: str):
@@ -484,14 +481,14 @@ def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, updat
 
 
 def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = None, only_return: bool = False):
-    out = run_exe(["list", "--prefix", env_prefix(), *query, "--json"])
-    if not out:
+    p = run_exe(["list", "--prefix", env_prefix(), *query, "--json"])
+    if not p.stdout:
         print("No results", file=sys.stderr)
         exit(1)
 
     conda_names, pip_names = spec_package_names()
 
-    pkg_infos = json.loads(out)
+    pkg_infos = json.loads(p.stdout)
     if pip is False:
         pkg_infos = [x for x in pkg_infos if x["channel"] != "pypi"]
     if pip is True:
@@ -532,11 +529,11 @@ def conda_search(pkg: str,
     if platform:
         args.extend(["--subdir", platform])
 
-    out = run_exe(["search", pkg, *args, "--json"], check=False, exe=conda_exe())
-    if not out:
+    p = run_exe(["search", pkg, *args, "--json"], check=False, exe=conda_exe())
+    if not p.stdout:
         print(f"Unable to query package through '{system_exe()}'", file=sys.stderr)
         exit(1)
-    res = json.loads(out)
+    res = json.loads(p.stdout)
     if "error" in res:
         print(res["error"], file=sys.stderr)
         exit(1)
