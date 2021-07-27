@@ -7,7 +7,8 @@ import click
 
 from coman.env import (change_spec, env_info, env_init, env_install, env_lock, env_python_exe, env_search, env_show,
                        env_uninstall)
-from coman.system import (conda_exe, env_name, env_prefix, is_micromamba, micromamba_exe, system_exe, system_platform)
+from coman.system import (conda_exe, env_name, env_prefix, is_conda, is_micromamba, micromamba_exe, system_exe,
+                          system_platform)
 
 
 class NaturalOrderGroup(click.Group):
@@ -181,12 +182,16 @@ def run(args, install: bool):
     if install:
         env_install(quiet=True)
 
-    # Currently only works with conda
-    exe = conda_exe(standalone=False)
-    if not exe:
-        print("This command requires a Conda installation", file=sys.stderr)
-        exit(1)
-    subprocess.run([exe, "run", "--prefix", env_prefix(), "--no-capture-out", "--live-stream", *args])
+    # "conda run" only works with regular conda
+    if is_conda(standalone=False):
+        p = subprocess.run([system_exe(), "run", "--prefix", env_prefix(), "--no-capture-out", "--live-stream", *args])
+        exit(p.returncode)
+
+    # workaround for other backends
+    exe_arg = "--micromamba" if is_micromamba() else ""
+    cmd = f"eval $({os.path.abspath(sys.argv[0])} {exe_arg} shell --hook --quiet) && {' '.join(args)} && exit 0"
+    p = subprocess.run(["/usr/bin/env", "bash", "-c", cmd])
+    exit(p.returncode)
 
 
 @cli.command()

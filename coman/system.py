@@ -54,7 +54,8 @@ def install_conda_exe() -> Optional[Path]:
     )
 
 
-def is_conda(exe: Path, standalone: Optional[bool] = None) -> bool:
+def is_conda(exe: Optional[Path] = None, standalone: Optional[bool] = None) -> bool:
+    exe = exe or system_exe()
     if standalone:
         return exe.name == "conda_standalone"
     if standalone is None:
@@ -62,12 +63,13 @@ def is_conda(exe: Path, standalone: Optional[bool] = None) -> bool:
     return exe.name == "conda"
 
 
-def is_mamba(exe: Path) -> bool:
+def is_mamba(exe: Optional[Path] = None) -> bool:
+    exe = exe or system_exe()
     return exe.name == "mamba"
 
 
 def is_micromamba(exe: Optional[Path] = None) -> bool:
-    exe = exe or _exe
+    exe = exe or system_exe()
     return exe is not None and exe.name == "micromamba"
 
 
