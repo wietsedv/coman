@@ -1,4 +1,4 @@
-import itertools
+import io
 import json
 import os
 import subprocess
@@ -8,13 +8,12 @@ from hashlib import md5
 from pathlib import Path
 from typing import Any, List, Optional
 
-from ensureconda import ensureconda
 from ensureconda.api import (determine_conda_version, determine_mamba_version, determine_micromamba_version)
-from ensureconda.installer import install_conda_exe, install_micromamba
+from ensureconda.installer import extract_files_from_conda_package, install_micromamba, request_url_with_retry
 from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
                                  micromamba_executables, platform_subdir, safe_next)
 
-MIN_CONDA_VERSION = LooseVersion("4.9")
+MIN_CONDA_VERSION = LooseVersion("4.10")
 MIN_MAMBA_VERSION = LooseVersion("0.15")
 
 _exe: Optional[Path] = None
@@ -22,53 +21,117 @@ _envs_dir = None
 _env_name = None
 
 
-def system_exe(mamba: Optional[bool] = None, micromamba: Optional[bool] = None, conda: Optional[bool] = None) -> Path:
-    global _exe
-    if _exe:
-        assert mamba is None and micromamba is None and conda is None
-        return _exe
+def install_conda_exe() -> Optional[Path]:
+    url = "https://api.anaconda.org/package/conda-forge/conda-standalone/files"
+    resp = request_url_with_retry(url)
+    subdir = platform_subdir()
 
-    if mamba or micromamba or conda:
-        mamba = mamba or False
-        micromamba = micromamba or False
-        conda = conda or False
-    else:
-        mamba, micromamba, conda = False, False, True
+    candidates = []
+    for file_info in resp.json():
+        if file_info["attrs"]["subdir"] == subdir:
+            candidates.append(file_info["attrs"])
 
-    e = ensureconda(
-        mamba=mamba,
-        micromamba=micromamba,
-        conda=conda,
-        conda_exe=conda,
-        min_mamba_version=MIN_MAMBA_VERSION,
-        min_conda_version=MIN_CONDA_VERSION,
+    candidates.sort(key=lambda attrs: (
+        LooseVersion(attrs["version"]),
+        attrs["build_number"],
+        attrs["timestamp"],
+    ))
+
+    chosen = candidates[-1]
+    resp = request_url_with_retry(chosen["source_url"])
+
+    tarball = io.BytesIO(resp.content)
+
+    return extract_files_from_conda_package(
+        tarball=tarball,
+        filename="standalone_conda/conda.exe",
+        dest_filename="conda_standalone",
     )
-    if not e:
-        raise RuntimeError("No valid conda installation was found")
-    _exe = Path(e)
-    return _exe
 
 
-def conda_exe(standalone: bool = True):
+def is_conda(exe: Path, standalone: bool = True) -> bool:
+    if standalone:
+        return exe.name in ["conda", "conda_standalone"]
+    return exe.name == "conda"
+
+
+def is_mamba(exe: Path) -> bool:
+    return exe.name == "mamba"
+
+
+def is_micromamba(exe: Optional[Path] = None) -> bool:
+    exe = exe or _exe
+    return exe is not None and exe.name == "micromamba"
+
+
+def conda_exe(standalone: bool = True, install: bool = True):
     global _exe
     if _exe and is_conda(_exe, standalone=standalone):
         return _exe
 
-    conda_iter = conda_executables()
+    for exe in conda_executables():
+        if determine_conda_version(exe) >= MIN_CONDA_VERSION:
+            return Path(exe)
+
     if standalone:
-        conda_iter = itertools.chain(conda_iter, conda_standalone_executables())
-    exe = safe_next(conda_iter)
-    if exe:
-        return Path(exe)
+        for exe in conda_standalone_executables():
+            if determine_conda_version(exe) >= MIN_CONDA_VERSION:
+                return Path(exe)
+
+    if install:
+        exe = install_conda_exe()
+        if exe and determine_conda_version(exe) >= MIN_CONDA_VERSION:
+            return Path(exe)
 
 
-def micromamba_exe():
+def mamba_exe():
+    global _exe
+    if _exe and is_mamba(_exe):
+        return _exe
+
+    for exe in mamba_executables():
+        if determine_mamba_version(exe) >= MIN_MAMBA_VERSION:
+            return Path(exe)
+
+
+def micromamba_exe(install: bool = True):
     global _exe
     if _exe and is_micromamba(_exe):
         return _exe
-    exe = safe_next(micromamba_executables())
-    if exe:
-        return Path(exe)
+
+    for exe in micromamba_executables():
+        if determine_micromamba_version(exe) >= MIN_MAMBA_VERSION:
+            return Path(exe)
+
+    if install:
+        exe = install_micromamba()
+        if exe and determine_micromamba_version(exe) >= MIN_MAMBA_VERSION:
+            return Path(exe)
+
+
+def system_exe(conda: Optional[bool] = None, mamba: Optional[bool] = None, micromamba: Optional[bool] = None) -> Path:
+    global _exe
+    if _exe:
+        assert conda is None and mamba is None and micromamba is None
+        return _exe
+
+    if conda or mamba or micromamba:
+        conda = conda or False
+        mamba = mamba or False
+        micromamba = micromamba or False
+    else:
+        conda, mamba, micromamba = True, True, True
+
+    if not _exe and conda:
+        _exe = conda_exe()
+    if not _exe and mamba:
+        _exe = mamba_exe()
+    if not _exe and micromamba:
+        _exe = micromamba_exe()
+
+    if not _exe:
+        raise RuntimeError("No valid conda installation was found")
+    return _exe
 
 
 def run_exe(args: List[Any], check: bool = True, exe: Optional[Path] = None):
@@ -93,7 +156,7 @@ def envs_dir():
         _envs_dir = Path(root)
         return _envs_dir
 
-    conda_prefix = os.getenv("MAMBA_ROOT_PREFIX", os.getenv("CONDA_PREFIX"))
+    conda_prefix = os.getenv("CONDA_PREFIX", os.getenv("MAMBA_ROOT_PREFIX"))
     if conda_prefix:
         _envs_dir = Path(conda_prefix) / "envs"
         return _envs_dir
@@ -137,21 +200,6 @@ def env_prefix_pip_hash() -> Optional[str]:
             return f.read().strip()
 
 
-def is_mamba(exe: Path) -> bool:
-    return exe.name == "mamba"
-
-
-def is_micromamba(exe: Optional[Path] = None) -> bool:
-    exe = exe or _exe
-    return exe is not None and exe.name == "micromamba"
-
-
-def is_conda(exe: Path, standalone: bool = True) -> bool:
-    if standalone:
-        return exe.name in ["conda", "conda_standalone"]
-    return exe.name == "conda"
-
-
 def system_platform():
     return platform_subdir()
 
@@ -166,26 +214,6 @@ def pypi_pkg_info(pkg: str):
 
 
 def conda_info():
-    # Mamba
-    mamba_exe = safe_next(mamba_executables())
-    mamba_ver = "n/a"
-    if mamba_exe:
-        mamba_ver = determine_mamba_version(mamba_exe)
-        mamba_state = "unsupported" if mamba_ver < MIN_MAMBA_VERSION else "ok"
-        mamba_ver = f"{mamba_ver} ({mamba_state}) [{mamba_exe}]"
-    print(f"> Mamba:            {mamba_ver}")
-
-    # Micromamba
-    micromamba_exe = safe_next(micromamba_executables())
-    micromamba_ver = determine_micromamba_version(micromamba_exe) if micromamba_exe else None
-    micromamba_state = "ok"
-    if not micromamba_ver or micromamba_ver < MIN_MAMBA_VERSION:
-        micromamba_exe = install_micromamba()
-        micromamba_ver = determine_micromamba_version(micromamba_exe) if micromamba_exe else None
-        micromamba_state = "unsupported" if micromamba_ver and micromamba_ver < MIN_MAMBA_VERSION else "ok"
-    micromamba_ver = f"{micromamba_ver} ({micromamba_state}) [{micromamba_exe}]" if micromamba_ver else "n/a"
-    print(f"> Micromamba:       {micromamba_ver}")
-
     # Conda
     conda_exe = safe_next(conda_executables())
     conda_ver = "n/a"
@@ -208,3 +236,23 @@ def conda_info():
     except IndexError:
         condastandalone_ver = "n/a"
     print(f"> Conda standalone: {condastandalone_ver}")
+
+    # Mamba
+    mamba_exe = safe_next(mamba_executables())
+    mamba_ver = "n/a"
+    if mamba_exe:
+        mamba_ver = determine_mamba_version(mamba_exe)
+        mamba_state = "unsupported" if mamba_ver < MIN_MAMBA_VERSION else "ok"
+        mamba_ver = f"{mamba_ver} ({mamba_state}) [{mamba_exe}]"
+    print(f"> Mamba:            {mamba_ver}")
+
+    # Micromamba
+    micromamba_exe = safe_next(micromamba_executables())
+    micromamba_ver = determine_micromamba_version(micromamba_exe) if micromamba_exe else None
+    micromamba_state = "ok"
+    if not micromamba_ver or micromamba_ver < MIN_MAMBA_VERSION:
+        micromamba_exe = install_micromamba()
+        micromamba_ver = determine_micromamba_version(micromamba_exe) if micromamba_exe else None
+        micromamba_state = "unsupported" if micromamba_ver and micromamba_ver < MIN_MAMBA_VERSION else "ok"
+    micromamba_ver = f"{micromamba_ver} ({micromamba_state}) [{micromamba_exe}]" if micromamba_ver else "n/a"
+    print(f"> Micromamba:       {micromamba_ver}")

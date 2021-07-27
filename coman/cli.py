@@ -6,10 +6,9 @@ from typing import List, Optional
 
 import click
 
-from coman.env import (change_spec, env_info, env_init, env_install, env_lock,
-                       env_python_exe, env_search, env_show, env_uninstall)
-from coman.system import (conda_exe, env_name, env_prefix, is_micromamba,
-                          micromamba_exe, system_exe, system_platform)
+from coman.env import (change_spec, env_info, env_init, env_install, env_lock, env_python_exe, env_search, env_show,
+                       env_uninstall)
+from coman.system import (conda_exe, env_name, env_prefix, is_micromamba, micromamba_exe, system_exe, system_platform)
 
 
 class NaturalOrderGroup(click.Group):
@@ -18,13 +17,13 @@ class NaturalOrderGroup(click.Group):
 
 
 @click.group(cls=NaturalOrderGroup)
+@click.option('--conda/--no-conda', default=None)
 @click.option('--mamba/--no-mamba', default=None)
 @click.option('--micromamba/--no-micromamba', default=None)
-@click.option('--conda/--no-conda', default=None)
 @click.version_option()
-def cli(mamba: Optional[bool], micromamba: Optional[bool], conda: Optional[bool]):
-    if mamba or micromamba or conda:
-        system_exe(mamba, micromamba, conda)
+def cli(conda: Optional[bool], mamba: Optional[bool], micromamba: Optional[bool]):
+    if conda or mamba or micromamba:
+        system_exe(conda, mamba, micromamba)
 
 
 @cli.command()
