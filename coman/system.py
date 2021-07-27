@@ -24,21 +24,22 @@ _env_name = None
 def install_conda_exe() -> Optional[Path]:
     url = "https://api.anaconda.org/package/conda-forge/conda-standalone/files"
     resp = request_url_with_retry(url)
-    subdir = platform_subdir()
 
     candidates = []
     for file_info in resp.json():
-        if file_info["attrs"]["subdir"] == subdir:
-            candidates.append(file_info["attrs"])
+        if file_info["attrs"]["subdir"] == system_platform():
+            candidates.append(file_info)
 
-    candidates.sort(key=lambda attrs: (
-        LooseVersion(attrs["version"]),
-        attrs["build_number"],
-        attrs["timestamp"],
-    ))
-
-    chosen = candidates[-1]
-    resp = request_url_with_retry(chosen["source_url"])
+    chosen = max(candidates,
+                 key=lambda attrs: (
+                     LooseVersion(attrs["version"]),
+                     attrs["attrs"]["build_number"],
+                     attrs["attrs"]["timestamp"],
+                 ))
+    url = chosen["download_url"]
+    if url.startswith("//"):
+        url = f"https:{url}"
+    resp = request_url_with_retry(url)
 
     tarball = io.BytesIO(resp.content)
 
