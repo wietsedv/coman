@@ -6,7 +6,7 @@ import sys
 from distutils.version import LooseVersion
 from hashlib import md5
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 import click
 
 from ensureconda.api import (determine_conda_version, determine_mamba_version, determine_micromamba_version)
@@ -125,7 +125,7 @@ def system_exe(conda: Optional[bool] = None,
                micromamba: Optional[bool] = None) -> Path:
     global _exe
     if _exe:
-        assert conda is None and mamba is None and micromamba is None
+        assert conda is None and conda_standalone is None and mamba is None and micromamba is None
         return _exe
 
     if conda or conda_standalone or mamba or micromamba:
@@ -234,6 +234,36 @@ def env_prefix_pip_hash() -> Optional[str]:
 
 def system_platform():
     return platform_subdir()
+
+
+def conda_search(pkg: str, channels: List[str], platform: Optional[str] = None) -> List[Dict[str, Any]]:
+    args = []
+    for c in channels:
+        args.extend(["-c", c])
+    if platform:
+        args.extend(["--subdir", platform])
+
+    p = run_exe(["search", pkg, *args, "--json"], check=False, exe=conda_exe())
+    if not p.stdout:
+        print(f"Unable to query package through '{system_exe()}'", file=sys.stderr)
+        exit(1)
+    res = json.loads(p.stdout)
+    if "error" in res:
+        print(res["error"], file=sys.stderr)
+        exit(1)
+
+    if pkg not in res:
+        print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}", file=sys.stderr)
+        exit(1)
+
+    info = res[pkg]
+    for pkg_info in info:
+        pkg_info["channel"] = pkg_info["channel"].split("/")[-2]
+    return info
+
+
+def conda_pkg_info(pkg: str, channels: List[str]):
+    return conda_search(pkg, channels)[-1]
 
 
 def pypi_pkg_info(pkg: str):

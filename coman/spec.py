@@ -22,21 +22,7 @@ def require_spec_file():
         exit(1)
 
 
-def spec_platforms() -> List[str]:
-    sys_platform = system_platform()
-    if not spec_file().exists():
-        return [sys_platform]
-    with open(spec_file()) as f:
-        env = yaml.safe_load(f)
-    platforms = env.get("platforms", [sys_platform])
-    if sys_platform not in platforms:
-        click.secho(f"WARNING: Platform {sys_platform} is not whitelisted in {spec_file()}\n",
-                    fg="yellow",
-                    file=sys.stderr)
-    return platforms
-
-
-def spec_pip_requirements():
+def spec_pip_requirements() -> Optional[str]:
     with open(spec_file()) as f:
         env = yaml.safe_load(f)
 
@@ -67,10 +53,75 @@ def spec_package_names() -> Tuple[List[str], List[str]]:
     return conda_names, pip_names
 
 
-def spec_channels() -> List[str]:
+def spec_dependencies() -> Tuple[List[dict], List[dict]]:
+    with open(spec_file()) as f:
+        env = yaml.round_trip_load(f)
+
+    conda_comments = env["dependencies"].ca.items
+    conda_specs, pip_specs = [], []
+    for i, pkg in enumerate(env["dependencies"]):
+        if isinstance(pkg, str):
+            name, ver = pkg.split()
+            comment = conda_comments[i][0].value.strip() if i in conda_comments else ""
+            conda_specs.append({"name": name, "version": ver, "comment": comment})
+            continue
+
+        if isinstance(pkg, dict) and "pip" in pkg:
+            pip_comments = env["dependencies"][i]["pip"].ca.items
+            for j, pip_pkg in enumerate(pkg["pip"]):
+                if isinstance(pip_pkg, str):
+                    name, ver = pip_pkg.split()
+                    comment = pip_comments[j][0].value.strip() if j in pip_comments else ""
+                    pip_specs.append({"name": name, "channel": "pypi", "version": ver, "comment": comment})
+
+    return conda_specs, pip_specs
+
+
+def _spec_load_list(key: str, item_key: str, default: List[dict] = []) -> List[dict]:
+    if not spec_file().exists():
+        return default
+
+    with open(spec_file()) as f:
+        env = yaml.round_trip_load(f)
+
+    if key not in env:
+        return default
+
+    comments = env[key].ca.items
+    items = []
+    for i, item in enumerate(env[key]):
+        comment = comments[i][0].value.strip() if i in comments else ""
+        items.append({item_key: item, "comment": comment})
+    return items
+
+
+
+def spec_platforms() -> List[dict]:
+    sys_platform = system_platform()
+    platforms = _spec_load_list("platforms", "platform", default=[{"platform": sys_platform}])
+    return platforms
+
+
+def spec_platform_names() -> List[str]:
+    sys_platform = system_platform()
     with open(spec_file()) as f:
         env = yaml.safe_load(f)
-    return env["channels"]
+    platform_names = env.get("platforms", [sys_platform])
+    if sys_platform not in platform_names:
+        click.secho(f"WARNING: Platform {sys_platform} is not whitelisted in {spec_file()}\n",
+                    fg="yellow",
+                    file=sys.stderr)
+    return platform_names
+
+
+def spec_channels() -> List[dict]:
+    return _spec_load_list("channels", "channel", default=[{"channel": "conda-forge"}])
+
+
+def spec_channel_names() -> List[str]:
+    with open(spec_file()) as f:
+        env = yaml.safe_load(f)
+    return env.get("channels", ["conda-forge"])
 
 
 def conda_lock_file(platform: Optional[str] = None):
@@ -119,6 +170,8 @@ def pip_lock_comments():
         for line in f:
             if name is not None:
                 if line.startswith("    --hash="):
+                    continue
+                if line == "    # via -r -\n":
                     continue
                 if line.startswith("    # "):
                     comment += " " + line[6:].strip()

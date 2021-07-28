@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from coman.utils import format_pkg_line, pkg_col_lengths
 from distutils.version import LooseVersion
 import hashlib
 import json
@@ -15,22 +15,12 @@ import ruamel.yaml as yaml
 from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser import LockSpecification
 
-from coman.spec import (conda_lock_file, conda_outdated, edit_spec_file, conda_lock_hash, pip_lock_comments,
-                        pip_lock_file, pip_lock_hash, pip_outdated, require_spec_file, spec_channels, spec_file,
-                        spec_package_names, spec_pip_requirements, spec_platforms)
-from coman.system import (conda_exe, conda_info, conda_root, env_prefix, envs_dir, pkgs_dir, pypi_pkg_info, run_exe,
+from coman.spec import (conda_lock_file, conda_outdated, conda_lock_hash, pip_lock_comments,
+                        pip_lock_file, pip_lock_hash, pip_outdated, require_spec_file, spec_channel_names, spec_file,
+                        spec_package_names, spec_pip_requirements, spec_platform_names)
+from coman.system import (conda_info, conda_pkg_info, conda_root, conda_search, env_prefix, envs_dir, pkgs_dir, run_exe,
                           system_exe, system_platform)
 from coman._version import __version__
-
-_COL_COLORS = {
-    "name": "green",
-    "version": "blue",
-    "old_version": "red",
-    "build": "yellow",
-    "channel": "bright_white",
-    "pypi": "cyan",
-    "comment": "white"
-}
 
 
 def env_python_exe():
@@ -111,7 +101,7 @@ def env_info():
 
 
 def _env_lock_conda():
-    platforms = spec_platforms()
+    platforms = spec_platform_names()
     new_lock_paths = [str(conda_lock_file(p)) for p in platforms]
     for lock_path in glob(str(conda_lock_file("*"))):
         if lock_path not in new_lock_paths:
@@ -260,27 +250,6 @@ def _env_install_pip():
         exit(1)
 
 
-def _pkg_str_lengths(pkg_infos: List[Dict[str, Any]], cols: List[str]):
-    return {col: max(map(lambda x: len(x.get(col, "")), pkg_infos)) for col in cols}
-
-
-def _format_pkg_str(pkg_info: dict, cols: List[str], pkg_str_lengths: Dict[str, int], bold: bool = False):
-    col_strs = []
-    for col in cols:
-        if pkg_str_lengths[col] == 0:
-            continue
-        fg = _COL_COLORS[col]
-        if col == "name" and pkg_info["channel"] == "pypi":
-            fg = _COL_COLORS["pypi"]
-        col_strs.append(click.style(pkg_info.get(col, "").ljust(pkg_str_lengths[col]), fg=fg, bold=bold))
-
-    if pkg_str_lengths.get("old_version", 0) > 0 and pkg_str_lengths.get("version", 0) > 0:
-        i = cols.index("old_version")
-        oldv = col_strs.pop(i)
-        col_strs[i] = f"{oldv} ➜ {col_strs[i]}"
-    return "  ".join(col_strs)
-
-
 def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool = False, show: bool = False):
     require_spec_file()
 
@@ -355,11 +324,10 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
             for pkg in upd_pkgs:
                 pkg["old_version"] = old_pkgs[old_pkg_names.index(pkg["name"])]["version"]
 
-            cols = ["name", "old_version", "version", "channel"]
-            pkg_str_lengths = _pkg_str_lengths(del_pkgs + add_pkgs + upd_pkgs, cols)
+            col_lengths = pkg_col_lengths(del_pkgs + add_pkgs + upd_pkgs, ["name", "old_version", "version", "channel"])
 
             for pkg_info in del_pkgs:
-                line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
+                line = format_pkg_line(pkg_info, col_lengths)
                 print(click.style("install:", fg="bright_white"),
                       click.style("-", fg="red"),
                       "  Removed",
@@ -367,7 +335,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
                       file=sys.stderr)
 
             for pkg_info in upd_pkgs:
-                line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
+                line = format_pkg_line(pkg_info, col_lengths)
                 print(click.style("install:", fg="bright_white"),
                       click.style("*", fg="yellow"),
                       "  Updated",
@@ -375,7 +343,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
                       file=sys.stderr)
 
             for pkg_info in add_pkgs:
-                line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
+                line = format_pkg_line(pkg_info, col_lengths)
                 print(click.style("install:", fg="bright_white"),
                       click.style("+", fg="green"),
                       "Installed",
@@ -387,109 +355,6 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
 
 def env_uninstall():
     run_exe(["env", "remove", "--prefix", env_prefix()])
-
-
-def change_spec(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool, update: bool, install: Optional[bool],
-                prune: Optional[bool], force: bool, show: bool):
-    require_spec_file()
-    spec_data, save_spec_file = edit_spec_file()
-
-    def _dep_names(deps):
-        return [pkg.split(" ")[0] if not isinstance(pkg, OrderedDict) else None for pkg in deps]
-
-    deps = spec_data["dependencies"]
-    dep_names = _dep_names(deps)
-
-    def _add_pkg(pkg: str, pip: bool):
-        if pip:
-            if "@" in pkg:
-                name, ver = pkg.split("@")
-                pkg_info = {"name": name, "version": ver}
-                pkg_spec = f"{name} {ver}"
-            else:
-                pkg_info = pypi_pkg_info(pkg)
-                name, ver = pkg_info["name"], pkg_info["version"]
-                pkg_spec = f"{name} >={ver}"
-        else:
-            pkg_info = conda_pkg_info(pkg, spec_data["channels"])
-            name, ver = pkg_info["name"], pkg_info["version"]
-            pkg_spec = f"{name} >={ver}"
-
-        i = len(deps)
-        if name in dep_names:
-            i = dep_names.index(name)
-            if deps[i] == pkg_spec:
-                return False
-            deps.pop(i)
-
-        deps.insert(i, pkg_spec)
-        dep_names.insert(i, name)
-
-        pkg_fmt = f"{click.style(name, fg='cyan' if pip else 'green')} ({click.style(ver, fg='blue')})"
-        print(click.style("   spec:", fg="bright_white"), f"Added {pkg_fmt} to dependencies", file=sys.stderr)
-        return True
-
-    def _remove_pkg(pkg: str):
-        if pkg not in dep_names:
-            return False
-
-        i = dep_names.index(pkg)
-        pkg = deps.pop(i)
-        dep_names.pop(i)
-
-        name, ver = pkg.split()
-        pkg_str = f"{click.style(name, fg='cyan' if pip else 'green')} ({click.style(ver, fg='blue')})"
-        print(click.style("   spec:", fg="bright_white"), f"Removed {pkg_str} from dependencies", file=sys.stderr)
-        return True
-
-    lock_conda = not pip
-    if pip:
-        if "pip" not in dep_names:
-            lock_conda = _add_pkg("pip", pip=False)
-        pip_deps = None
-        for spec in deps:
-            if isinstance(spec, OrderedDict) and "pip" in spec:
-                if not spec["pip"]:
-                    spec["pip"] = []
-                pip_deps = spec["pip"]
-                break
-        if pip_deps is None:
-            deps.append(dict(pip=[]))
-            pip_deps = deps[-1]["pip"]
-
-        deps = pip_deps
-        dep_names = _dep_names(deps)
-
-    changed = False
-    for pkg in add_pkgs:
-        if _add_pkg(pkg, pip=pip):
-            changed = True
-    for pkg in remove_pkgs:
-        if _remove_pkg(pkg):
-            changed = True
-
-    if not changed:
-        if add_pkgs:
-            print(click.style("   spec:", fg="bright_white"),
-                  click.style("No new dependencies added", fg="yellow"),
-                  file=sys.stderr)
-        if remove_pkgs:
-            print(click.style("   spec:", fg="bright_white"),
-                  click.style("No dependencies removed", fg="yellow"),
-                  file=sys.stderr)
-
-    save_spec_file()
-    if update:
-        print(file=sys.stderr)
-        env_lock(conda=lock_conda)
-
-    if install is None:
-        install = env_prefix().exists()
-
-    prune = len(remove_pkgs) > 0 or prune
-    if update and install:
-        print(file=sys.stderr)
-        env_install(prune=prune, force=force, show=show)
 
 
 def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = None, only_return: bool = False):
@@ -514,8 +379,7 @@ def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = No
     if only_return:
         return pkg_infos
 
-    cols = ["name", "version", "channel", "comment"]
-    pkg_str_lengths = _pkg_str_lengths(pkg_infos, cols) if not only_return else {}
+    col_lengths = pkg_col_lengths(pkg_infos, ["name", "version", "channel", "comment"]) if not only_return else {}
 
     for pkg_info in pkg_infos:
         name = pkg_info["name"]
@@ -526,56 +390,21 @@ def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = No
                 warning = "WARNING: conda dependency overriden by pip"
             # elif name not in pip_names:
             #     warning = "WARNING: implicit pip dependency"
-        line = _format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths)
+        line = format_pkg_line(pkg_info, col_lengths)
         if warning:
-            line = f"{line}  {click.style(warning, fg='yellow')}"
+            line = f"- {line}  {click.style(warning, fg='yellow')}"
         print(line)
 
     return pkg_infos
 
 
-def conda_search(pkg: str,
-                 channels: Optional[List[str]] = None,
-                 platform: Optional[str] = None) -> List[Dict[str, Any]]:
-    channels = channels or spec_channels()
-    args = []
-    for c in channels:
-        args.extend(["-c", c])
-    if platform:
-        args.extend(["--subdir", platform])
-
-    p = run_exe(["search", pkg, *args, "--json"], check=False, exe=conda_exe())
-    if not p.stdout:
-        print(f"Unable to query package through '{system_exe()}'", file=sys.stderr)
-        exit(1)
-    res = json.loads(p.stdout)
-    if "error" in res:
-        print(res["error"], file=sys.stderr)
-        exit(1)
-
-    if pkg not in res:
-        print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}", file=sys.stderr)
-        exit(1)
-
-    info = res[pkg]
-    for pkg_info in info:
-        pkg_info["channel"] = pkg_info["channel"].split("/")[-2]
-    return info
-
-
-def conda_pkg_info(pkg: str, channels: Optional[List[str]] = None):
-    return conda_search(pkg, channels)[-1]
-
-
 def env_search(pkg: str, platform: Optional[str], limit: int):
-    platforms = [platform] if platform else spec_platforms()
-
-    cols = ["name", "version", "build", "channel"]
+    platforms = [platform] if platform else spec_platform_names()
 
     for i, platform in enumerate(platforms, start=1):
         if i > 1:
             print()
-        pkg_infos = conda_search(pkg, platform=platform)
+        pkg_infos = conda_search(pkg, channels=spec_channel_names(), platform=platform)
         if limit > 0:
             pkg_infos = pkg_infos[-limit:]
         click.secho(f"# platform: {click.style(platform, bold=True)}", fg="magenta")
@@ -583,9 +412,9 @@ def env_search(pkg: str, platform: Optional[str], limit: int):
             click.secho("No results", fg="yellow")
             exit(1)
 
-        pkg_str_lengths = _pkg_str_lengths(pkg_infos, cols)
+        col_lengths = pkg_col_lengths(pkg_infos, ["name", "version", "build", "channel"])
         for j, pkg_info in enumerate(pkg_infos, start=1):
-            print(_format_pkg_str(pkg_info, cols=cols, pkg_str_lengths=pkg_str_lengths, bold=j == len(pkg_infos)))
+            print(format_pkg_line(pkg_info, col_lengths, bold=j == len(pkg_infos)))
 
 
 def env_init():
@@ -599,7 +428,7 @@ def env_init():
         click.style("environment.yml", fg="green"),
         file=sys.stderr,
     )
-    pkg_info = conda_pkg_info("python", ["conda-forge"])
+    pkg_info = conda_pkg_info("python", channels=["conda-forge"])
     pkg_str = f"{pkg_info['name']} >={pkg_info['version']}"
 
     with open(spec_file(), "w") as f:

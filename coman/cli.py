@@ -5,15 +5,11 @@ from typing import List, Optional
 
 import click
 
-from coman.env import (change_spec, env_info, env_init, env_install, env_lock, env_python_exe, env_search, env_show,
-                       env_uninstall)
+from coman.env import (env_info, env_init, env_install, env_lock, env_python_exe, env_search, env_show, env_uninstall)
 from coman.system import (conda_exe, env_name, env_prefix, is_conda, is_micromamba, micromamba_exe, system_exe,
                           system_platform)
-
-
-class NaturalOrderGroup(click.Group):
-    def list_commands(self, _):
-        return self.commands.keys()
+from coman.commands import spec
+from coman.commands.utils import NaturalOrderGroup
 
 
 @click.group(cls=NaturalOrderGroup)
@@ -66,7 +62,7 @@ def lock():
     env_lock()
 
 
-@cli.command()
+@click.command()
 @click.option("--prune/--no-prune", default=None)
 @click.option("--force", default=False, is_flag=True)
 @click.option("--show/--no-show", default=True)
@@ -78,6 +74,16 @@ def install(prune: Optional[bool], force: bool, show: bool):
 
 
 @cli.command()
+def uninstall():
+    """
+    Uninstall the environment
+
+    You must deactivate the environment before you can remove it.
+    """
+    env_uninstall()
+
+
+@click.command()
 @click.option("--install/--no-install", default=True)
 @click.option("--prune/--no-prune", default=None)
 @click.option("--force", default=False, is_flag=True)
@@ -92,60 +98,11 @@ def update(install: bool, prune: Optional[bool], force: bool, show: bool):
         env_install(prune=prune, force=force, show=show)
 
 
-@cli.command()
-@click.argument("pkgs", nargs=-1)
-@click.option("--pip", default=False, is_flag=True)
-@click.option("--update/--no-update", default=True)
-@click.option("--install/--no-install", default=None)
-@click.option("--prune/--no-prune", default=None)
-@click.option("--force", default=False, is_flag=True)
-@click.option("--show/--no-show", default=True)
-def add(pkgs: List[str], pip: bool, update: bool, install: Optional[bool], prune: Optional[bool], force: bool,
-        show: bool):
-    """
-    Add a package to environment.yml, update the lock file(s) and install the environment
-    """
-    change_spec(add_pkgs=pkgs,
-                remove_pkgs=[],
-                pip=pip,
-                update=update,
-                install=install,
-                prune=prune,
-                force=force,
-                show=show)
-
-
-@cli.command()
-@click.argument("pkgs", nargs=-1)
-@click.option("--pip", default=False, is_flag=True)
-@click.option("--update/--no-update", default=True)
-@click.option("--install/--no-install", default=None)
-@click.option("--prune/--no-prune", default=None)
-@click.option("--force", default=False, is_flag=True)
-@click.option("--show/--no-show", default=True)
-def remove(pkgs: List[str], pip: bool, update: bool, install: Optional[bool], prune: Optional[bool], force: bool,
-           show: bool):
-    """
-    Remove a package from environment.yml, update the lock file(s) and install the environment
-    """
-    change_spec(add_pkgs=[],
-                remove_pkgs=pkgs,
-                pip=pip,
-                update=update,
-                install=install,
-                prune=prune,
-                force=force,
-                show=show)
-
-
-@cli.command()
-def uninstall():
-    """
-    Uninstall the environment
-
-    You must deactivate the environment before you can remove it.
-    """
-    env_uninstall()
+cli.add_command(spec.deps_list)
+cli.add_command(spec.deps_add)
+cli.add_command(spec.deps_remove)
+cli.add_command(spec.platform)
+cli.add_command(spec.channel)
 
 
 @cli.command()
