@@ -109,8 +109,9 @@ cli.add_command(spec.channel)
 @click.argument("pkg")
 @click.option("--platform", default=None)
 @click.option("--limit", type=int, default=5)
-def search(pkg: str, platform: Optional[str], limit: int):
-    env_search(pkg, platform, limit)
+@click.option("--deps", default=False, is_flag=True)
+def search(pkg: str, platform: Optional[str], limit: int, deps: bool):
+    env_search(pkg, platform, limit, deps)
 
 
 @cli.command()

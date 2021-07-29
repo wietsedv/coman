@@ -1,4 +1,3 @@
-from coman.utils import format_pkg_line, pkg_col_lengths
 from distutils.version import LooseVersion
 import hashlib
 import json
@@ -20,6 +19,7 @@ from coman.spec import (conda_lock_file, conda_outdated, conda_lock_hash, pip_lo
                         spec_package_names, spec_pip_requirements, spec_platform_names)
 from coman.system import (conda_info, conda_pkg_info, conda_root, conda_search, env_prefix, envs_dir, pkgs_dir, run_exe,
                           system_exe, system_platform)
+from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
 from coman._version import __version__
 
 
@@ -401,13 +401,16 @@ def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = No
     return pkg_infos
 
 
-def env_search(pkg: str, platform: Optional[str], limit: int):
+def env_search(pkg: str, platform: Optional[str], limit: int, deps: bool):
     platforms = [platform] if platform else spec_platform_names()
+    channels = spec_channel_names()
+
+    print("Searching in:", ", ".join([click.style(c, fg=COLORS["channel"]) for c in channels]) + "\n", file=sys.stderr)
 
     for i, platform in enumerate(platforms, start=1):
         if i > 1:
             print(file=sys.stderr)
-        pkg_infos = conda_search(pkg, channels=spec_channel_names(), platform=platform)
+        pkg_infos = conda_search(pkg, channels=channels, platform=platform)
         if limit > 0:
             pkg_infos = pkg_infos[-limit:]
         click.secho(f"# platform: {click.style(platform, bold=True)}", fg="magenta")
@@ -415,7 +418,10 @@ def env_search(pkg: str, platform: Optional[str], limit: int):
             click.secho("No results", fg="yellow")
             exit(1)
 
-        col_lengths = pkg_col_lengths(pkg_infos, ["name", "version", "build", "channel"])
+        cols = ["name", "version", "build", "channel", "platform"]
+        if deps:
+            cols.append("depends")
+        col_lengths = pkg_col_lengths(pkg_infos, cols)
         for j, pkg_info in enumerate(pkg_infos, start=1):
             print(format_pkg_line(pkg_info, col_lengths, bold=j == len(pkg_infos)))
 

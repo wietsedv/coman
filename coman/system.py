@@ -258,7 +258,9 @@ def conda_search(pkg: str, channels: List[str], platform: Optional[str] = None) 
 
     info = res[pkg]
     for pkg_info in info:
+        pkg_info["platform"] = pkg_info["subdir"]
         pkg_info["channel"] = pkg_info["channel"].split("/")[-2]
+        pkg_info["depends"] = "\n" + "".join([f"- {dep}\n" for dep in pkg_info["depends"]])
     return info
 
 

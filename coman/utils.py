@@ -26,9 +26,10 @@ def format_pkg_line(pkg_info: dict, col_lengths: Dict[str, int], bold: bool = Fa
     for col in cols:
         if col_lengths[col] == 0:
             continue
-        fg = COLORS[col]
         if col == "name" and pkg_info.get("channel", None) == "pypi":
             fg = COLORS["pypi"]
+        else:
+            fg = COLORS.get(col, None)
         col_strs.append(click.style((pkg_info.get(col, None) or "").ljust(col_lengths[col]), fg=fg, bold=bold))
 
     if col_lengths.get("old_version", 0) > 0 and col_lengths.get("version", 0) > 0:
