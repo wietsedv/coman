@@ -8,11 +8,12 @@ import subprocess
 import sys
 from glob import glob
 from typing import Any, Dict, Iterator, List, Optional
-import click
 
 import ruamel.yaml as yaml
 from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser import LockSpecification
+import click
+from semantic_version import Version, SimpleSpec
 
 from coman.spec import (conda_lock_file, conda_outdated, conda_lock_hash, pip_lock_comments,
                         pip_lock_file, pip_lock_hash, pip_outdated, require_spec_file, spec_channel_names, spec_file,
@@ -29,7 +30,7 @@ def env_python_exe():
 
 def env_python_version():
     vstring = subprocess.check_output([env_python_exe(), "--version"], encoding="utf-8").split(" ")[-1].strip()
-    return LooseVersion(vstring)
+    return Version(vstring)
 
 
 def filter_platform_selectors(content: str, platform) -> Iterator[str]:
@@ -405,22 +406,48 @@ def env_search(pkg: str, platform: Optional[str], limit: int, deps: bool):
     platforms = [platform] if platform else spec_platform_names()
     channels = spec_channel_names()
 
-    print("Searching in:", ", ".join([click.style(c, fg=COLORS["channel"]) for c in channels]) + "\n", file=sys.stderr)
+    python_ver = None
+    if env_prefix().exists():
+        python_ver = env_python_version()
+        print("Python:  ", python_ver)
+
+    print("Channels:", ", ".join([click.style(c, fg=COLORS["channel"]) for c in channels]) + "\n", file=sys.stderr)
 
     for i, platform in enumerate(platforms, start=1):
         if i > 1:
             print(file=sys.stderr)
         pkg_infos = conda_search(pkg, channels=channels, platform=platform)
-        if limit > 0:
-            pkg_infos = pkg_infos[-limit:]
         click.secho(f"# platform: {click.style(platform, bold=True)}", fg="magenta")
         if not pkg_infos:
             click.secho("No results", fg="yellow")
             exit(1)
 
+        # Filter Python version
+        if python_ver:
+            suffix_re = re.compile("(-?[a-z]+[0-9]*)|(\*)$")
+            py_pkg_infos = []
+            for pkg_info in pkg_infos:
+                ok = True
+                for dep in pkg_info["depends"]:
+                    name, *args = dep.split()
+                    if name == "python":
+                        if len(args) > 0:
+                            ver = suffix_re.sub("", args[0])
+                            ok = SimpleSpec(ver).match(python_ver)
+                        break
+                if ok:
+                    py_pkg_infos.append(pkg_info)
+            pkg_infos = py_pkg_infos
+
+        if limit > 0:
+            pkg_infos = pkg_infos[-limit:]
+
         cols = ["name", "version", "build", "channel", "platform"]
         if deps:
+            for pkg_info in pkg_infos:
+                pkg_info["depends"] = pkg_info["depends"] = "\n" + "".join([f"- {dep}\n" for dep in pkg_info["depends"]])
             cols.append("depends")
+
         col_lengths = pkg_col_lengths(pkg_infos, cols)
         for j, pkg_info in enumerate(pkg_infos, start=1):
             print(format_pkg_line(pkg_info, col_lengths, bold=j == len(pkg_infos)))
