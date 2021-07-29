@@ -6,7 +6,7 @@ from typing import List, Optional
 import click
 
 from coman.env import (env_info, env_init, env_install, env_lock, env_python_exe, env_search, env_show, env_uninstall)
-from coman.system import (conda_exe, env_name, env_prefix, is_conda, is_micromamba, micromamba_exe, system_exe,
+from coman.system import (conda_exe, env_name, env_prefix, envs_dir, is_conda, is_micromamba, micromamba_exe, pkgs_dir, system_exe,
                           system_platform)
 from coman.commands import spec
 from coman.commands.utils import NaturalOrderGroup
@@ -14,7 +14,8 @@ from coman.commands.utils import NaturalOrderGroup
 
 def silent_shell_hook():
     exe_flag = " --micromamba" if is_micromamba() else ""
-    return f"eval $({os.path.abspath(sys.argv[0])}{exe_flag} shell --hook --quiet)"
+    bin_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    return f"eval $({bin_dir}/coman{exe_flag} shell --hook --quiet)"
 
 
 @click.group(cls=NaturalOrderGroup)
@@ -133,18 +134,7 @@ def show(query: List[str], install: bool, deps: bool, pip: Optional[bool]):
     env_show(query, deps, pip)
 
 
-@cli.command()
-@click.argument("args", nargs=-1)
-@click.option("--install/--no-install", default=True)
-def run(args, install: bool):
-    """
-    Run a command within the environment
-
-    Automatically installs the environment if it does not exist yet.
-    """
-    if install:
-        env_install(quiet=True)
-
+def env_run(args: List[str]):
     # "conda run" only works with regular conda
     if is_conda(standalone=False):
         p = subprocess.run([system_exe(), "run", "--prefix", env_prefix(), "--no-capture-out", "--live-stream", *args])
@@ -152,8 +142,48 @@ def run(args, install: bool):
 
     # workaround for other backends
     cmd = " ".join(args)
-    exit(subprocess.run(["/usr/bin/env", "bash", "-c", f"{silent_shell_hook()} && {cmd} && exit 0"]).returncode)
+    exit(subprocess.run([
+        "/usr/bin/env",
+        "bash",
+        "-c",
+        f"{silent_shell_hook()} && {cmd} && exit 0",
+    ]).returncode)
 
+
+@cli.command()
+@click.option("--install/--no-install", default=True)
+@click.argument("args", nargs=-1)
+def run(install: bool, args: List[str]):
+    """
+    Run a command within the environment
+
+    Automatically installs the environment if it does not exist yet.
+    """
+    if install:
+        env_install(quiet=True)
+    env_run(args)
+
+
+@cli.command()
+@click.option("--install/--no-install", default=True)
+@click.argument("args", nargs=-1)
+def bash(install: bool, args: List[str]):
+    if install:
+        env_install(quiet=True)
+    env_run(["bash", *args])
+
+
+@cli.command()
+@click.option("--install/--no-install", default=True)
+@click.argument("args", nargs=-1)
+def python(install: bool, args: List[str]):
+    if install:
+        env_install(quiet=True)
+    python_exe = env_python_exe()
+    if not python_exe.exists():
+        click.secho("The python executable is unreachable. Have you installed the environment?", fg="red")
+        exit(1)
+    exit(subprocess.run([python_exe, *args]).returncode)
 
 
 @cli.command()
