@@ -12,6 +12,11 @@ from coman.commands import spec
 from coman.commands.utils import NaturalOrderGroup
 
 
+def silent_shell_hook():
+    exe_flag = " --micromamba" if is_micromamba() else ""
+    return f"eval $({os.path.abspath(sys.argv[0])}{exe_flag} shell --hook --quiet)"
+
+
 @click.group(cls=NaturalOrderGroup)
 @click.option('--conda/--no-conda', default=None)
 @click.option('--conda-standalone/--no-conda-standalone', default=None)
@@ -146,10 +151,9 @@ def run(args, install: bool):
         exit(p.returncode)
 
     # workaround for other backends
-    exe_arg = "--micromamba" if is_micromamba() else ""
-    cmd = f"eval $({os.path.abspath(sys.argv[0])} {exe_arg} shell --hook --quiet) && {' '.join(args)} && exit 0"
-    p = subprocess.run(["/usr/bin/env", "bash", "-c", cmd])
-    exit(p.returncode)
+    cmd = " ".join(args)
+    exit(subprocess.run(["/usr/bin/env", "bash", "-c", f"{silent_shell_hook()} && {cmd} && exit 0"]).returncode)
+
 
 
 @cli.command()
@@ -166,7 +170,6 @@ def shell(hook: bool, install: bool, quiet: bool):
         env_install(quiet=True)
 
     from shellingham import detect_shell
-
     shell_name, shell_path = detect_shell()
 
     if hook:
@@ -174,31 +177,18 @@ def shell(hook: bool, install: bool, quiet: bool):
         if not is_micromamba():
             exe = conda_exe(standalone=False)
             if exe:
-                if hook:
-                    if not quiet:
-                        print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
-                    print(f"eval \"$('{exe}' shell.{shell_name} hook)\" && conda activate \"{env_prefix()}\"")
-                    exit(0)
+                if not quiet:
+                    print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
+                print(f"eval \"$('{exe}' shell.{shell_name} hook)\" && conda activate \"{env_prefix()}\"")
+                exit(0)
 
+        if not quiet:
+            print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
         exe = micromamba_exe()
-        if hook:
-            if not quiet:
-                print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
-            print(f"eval \"$('{exe}' shell hook -s {shell_name})\" && micromamba activate \"{env_prefix()}\"")
-            exit(0)
+        print(f"eval \"$('{exe}' shell hook -s {shell_name})\" && micromamba activate \"{env_prefix()}\"")
+        exit(0)
 
-    else:
-        import pexpect
-
-        c = pexpect.spawn(shell_path, ["-i"])
-        if shell_name == "zsh":
-            c.setecho(False)
-
-        shell_hook = f"eval $({os.path.abspath(sys.argv[0])} shell --hook --quiet)"
-        c.sendline(shell_hook)
-        c.interact(escape_character=None)
-        c.close()
-        exit(c.exitstatus)
+    exit(subprocess.run([shell_path, "-c", f"{silent_shell_hook()}; {shell_path} -i"]).returncode)
 
 
 if __name__ == "__main__":

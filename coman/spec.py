@@ -27,7 +27,7 @@ def require_spec_file():
 
 
 def spec_pip_requirements() -> Optional[str]:
-    with open(spec_file()) as f:
+    with open(require_spec_file()) as f:
         env = yaml.safe_load(f)
 
     for pkg in env["dependencies"]:
@@ -44,7 +44,7 @@ def spec_pip_requirements() -> Optional[str]:
 
 
 def spec_package_names() -> Tuple[List[str], List[str]]:
-    with open(spec_file()) as f:
+    with open(require_spec_file()) as f:
         env = yaml.safe_load(f)
 
     conda_names, pip_names = [], []
@@ -58,7 +58,7 @@ def spec_package_names() -> Tuple[List[str], List[str]]:
 
 
 def spec_dependencies() -> Tuple[List[dict], List[dict]]:
-    with open(spec_file()) as f:
+    with open(require_spec_file()) as f:
         env = yaml.round_trip_load(f)
 
     conda_comments = env["dependencies"].ca.items
@@ -108,7 +108,7 @@ def spec_platforms() -> List[dict]:
 
 def spec_platform_names() -> List[str]:
     sys_platform = system_platform()
-    with open(spec_file()) as f:
+    with open(require_spec_file()) as f:
         env = yaml.safe_load(f)
     platform_names = env.get("platforms", [sys_platform])
     if sys_platform not in platform_names:
@@ -123,7 +123,8 @@ def spec_channels() -> List[dict]:
 
 
 def spec_channel_names() -> List[str]:
-    with open(spec_file()) as f:
+    spec_path = require_spec_file()
+    with open(spec_path) as f:
         env = yaml.safe_load(f)
     return env.get("channels", ["conda-forge"])
 
