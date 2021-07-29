@@ -62,7 +62,7 @@ def lock():
     env_lock()
 
 
-@click.command()
+@cli.command()
 @click.option("--prune/--no-prune", default=None)
 @click.option("--force", default=False, is_flag=True)
 @click.option("--show/--no-show", default=True)
@@ -83,7 +83,7 @@ def uninstall():
     env_uninstall()
 
 
-@click.command()
+@cli.command()
 @click.option("--install/--no-install", default=True)
 @click.option("--prune/--no-prune", default=None)
 @click.option("--force", default=False, is_flag=True)
@@ -94,13 +94,13 @@ def update(install: bool, prune: Optional[bool], force: bool, show: bool):
     """
     env_lock()
     if install:
-        print()
+        print(file=sys.stderr)
         env_install(prune=prune, force=force, show=show)
 
 
-cli.add_command(spec.deps_list)
-cli.add_command(spec.deps_add)
-cli.add_command(spec.deps_remove)
+cli.add_command(spec.list_deps)
+cli.add_command(spec.add)
+cli.add_command(spec.remove)
 cli.add_command(spec.platform)
 cli.add_command(spec.channel)
 

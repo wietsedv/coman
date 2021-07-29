@@ -10,16 +10,20 @@ import click
 ENV_HASH_PATTERN = re.compile(r"^# env_hash: (.*)$")
 PLATFORM_PATTERN = re.compile(r"^# platform: (.*)$")
 
+PLATFORMS = ["linux-64", "linux-aarch64", "linux-ppc64le", "osx-64", "osx-arm64", "win-64"]
+
 
 def spec_file():
     return Path("environment.yml")
 
 
 def require_spec_file():
-    if not spec_file().exists():
+    spec_path = spec_file()
+    if not spec_path.exists():
         print(f"Specification file `{spec_file()}` is not found in the current directory. Create it with `coman init`",
               file=sys.stderr)
         exit(1)
+    return spec_path
 
 
 def spec_pip_requirements() -> Optional[str]:
@@ -197,9 +201,7 @@ def pip_outdated(pip_hash: Optional[str] = None):
 
 
 def edit_spec_file() -> Tuple[dict, Callable]:
-    spec_path = spec_file()
-    if not spec_file().exists():
-        raise FileNotFoundError(f"{spec_path} not found")
+    spec_path = require_spec_file()
 
     yaml_ = yaml.YAML()
     with open(spec_path) as f:

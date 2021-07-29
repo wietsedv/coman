@@ -110,6 +110,7 @@ def _env_lock_conda():
                 "Removing",
                 click.style("Conda", fg="green", bold=True),
                 "lock file",
+                click.style(f"[{lock_path}]", fg="bright_white"),
                 file=sys.stderr,
             )
             os.remove(lock_path)
@@ -163,15 +164,17 @@ def _run_pip_compile(requirements):
 def _env_lock_pip():
     requirements = spec_pip_requirements()
     if not requirements:
-        if pip_lock_file().exists():
+        lock_path = pip_lock_file()
+        if lock_path.exists():
             print(
                 click.style("   lock:", fg="bright_white"),
                 "Removing",
                 click.style("Pip", fg="cyan", bold=True),
                 "lock file",
+                click.style(f"[{lock_path}]", fg="bright_white"),
                 file=sys.stderr,
             )
-            os.remove(pip_lock_file())
+            os.remove(lock_path)
         return
 
     print(
@@ -305,7 +308,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
     if not installed:
         return
 
-    print()
+    print(file=sys.stderr)
     if show:
         new_pkgs = env_show(deps=True, only_return=True)
         if new_pkgs != old_pkgs:
@@ -350,7 +353,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
                       line,
                       file=sys.stderr)
 
-            print()
+            print(file=sys.stderr)
 
 
 def env_uninstall():
@@ -403,7 +406,7 @@ def env_search(pkg: str, platform: Optional[str], limit: int):
 
     for i, platform in enumerate(platforms, start=1):
         if i > 1:
-            print()
+            print(file=sys.stderr)
         pkg_infos = conda_search(pkg, channels=spec_channel_names(), platform=platform)
         if limit > 0:
             pkg_infos = pkg_infos[-limit:]
@@ -434,5 +437,5 @@ def env_init():
     with open(spec_file(), "w") as f:
         f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg_str}\n")
 
-    print()
+    print(file=sys.stderr)
     env_lock()

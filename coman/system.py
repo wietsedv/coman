@@ -253,7 +253,7 @@ def conda_search(pkg: str, channels: List[str], platform: Optional[str] = None) 
         exit(1)
 
     if pkg not in res:
-        print(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}", file=sys.stderr)
+        click.secho(f"Package '{pkg}' not found. Did you mean: {', '.join(sorted(res))}", fg="yellow", file=sys.stderr)
         exit(1)
 
     info = res[pkg]
