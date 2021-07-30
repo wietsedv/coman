@@ -13,6 +13,8 @@ CoMan manages:
    - `add`/`remove` dependencies with version constraints
  - `conda-{platform}.lock`:
    - (multi-platform) lock files for reproducable environments
+ - `requirements.txt`:
+   - (optional) pinned pip dependencies from `environment.yml`
  - `{CONDA_ROOT}/envs/{basename}-{hash}`:
    - unique environments for your project in your default environments directory
 
