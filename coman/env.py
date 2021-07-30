@@ -1,5 +1,6 @@
 import hashlib
 import json
+from json.decoder import JSONDecodeError
 import os
 import re
 import subprocess
@@ -7,10 +8,11 @@ import sys
 from glob import glob
 from pathlib import Path
 from typing import Iterator, List, Optional
+import shlex
 
 import click
 import ruamel.yaml as yaml
-from conda_lock.conda_lock import create_lockfile_from_spec
+from conda_lock.conda_lock import conda_env_override, fn_to_dist_name, search_for_md5s
 from conda_lock.src_parser import LockSpecification
 from semantic_version import SimpleSpec, Version
 
@@ -18,8 +20,8 @@ from coman._version import __version__
 from coman.spec import (conda_lock_file, conda_lock_hash, conda_outdated, pip_lock_comments, pip_lock_file,
                         pip_lock_hash, pip_outdated, require_spec_file, spec_channel_names, spec_file,
                         spec_package_names, spec_pip_requirements, spec_platform_names)
-from coman.system import (conda_info, conda_pkg_info, conda_root, conda_search, env_prefix, envs_dir, pkgs_dir, run_exe,
-                          system_exe, system_platform)
+from coman.system import (conda_info, conda_pkg_info, conda_root, conda_search, env_prefix, envs_dir, is_micromamba,
+                          pkgs_dir, run_exe, system_exe, system_platform)
 from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
 
 
@@ -65,6 +67,212 @@ def parse_environment_file(spec_file: Path, platform: str) -> LockSpecification:
     channels = env_yaml_data.get("channels", [])
 
     return LockSpecification(specs=specs, channels=channels, platform=platform)
+
+
+def parse_unsatisfiable_error(msg: str):
+    spec_re = re.compile(r"(- )?(?:([a-zA-Z0-9_-]+)(?:\[version='([^']+)'\]|(==?[^ ]+)) -> )?(\w+)(?:\[version='([^']+)'\]|(==?[^ ]+))?")
+
+    conflicts = {}
+    incompatible = set()
+    for line in msg.splitlines():
+        m = spec_re.match(line.strip().replace("The following", " The following"))
+        if m:
+            compat, spec_name, spec_ver, spec_ver_, dep_name, dep_ver, dep_ver_ = m.groups()
+            spec_ver = spec_ver or spec_ver_
+            dep_ver = dep_ver or dep_ver_
+            if spec_ver is None and dep_ver is None:
+                continue
+
+            if dep_name not in conflicts:
+                conflicts[dep_name] = {"spec": None, "children": [], "compatible": True}
+
+            if spec_name is None:
+                conflicts[dep_name]["spec"] = dep_ver
+            else:
+                if compat is not None:
+                    incompatible.add(spec_name)
+                    conflicts[dep_name]["compatible"] = False
+                conflicts[dep_name]["children"].append((spec_name, spec_ver, dep_name, dep_ver))
+
+    # def _prune_conflicts(conflicts, names):
+    #     for name in names:
+    #         incompatible.add(name)
+    #         if name not in conflicts:
+    #             continue
+
+    #         child_names = [child[0] for child in conflicts[name]["children"]]
+    #         if child_names:
+    #             _prune_conflicts(conflicts, child_names)
+
+    #         del conflicts[name]
+
+    # _prune_conflicts(conflicts, list(incompatible))
+
+    # for dep_name in list(conflicts.keys()):
+    #     if not conflicts[dep_name]["compatible"]:
+    #         continue
+    #     for child in conflicts[dep_name]["children"]:
+    #         if child[0] in incompatible:
+    #             del conflicts[dep_name]
+    #             break
+
+    return conflicts
+
+
+def solve_specs_for_arch(channels: List[str], specs: List[str], platform: str) -> dict:
+    exe = system_exe()
+    args = [
+        str(exe),
+        "create",
+        "--prefix",
+        os.path.join(pkgs_dir(), "prefix"),
+        "--dry-run",
+        "--json",
+    ]
+    conda_flags = os.environ.get("CONDA_FLAGS")
+    if conda_flags:
+        args.extend(shlex.split(conda_flags))
+    if channels:
+        args.append("--override-channels")
+    for channel in channels:
+        args.extend(["--channel", channel])
+    args.extend(specs)
+
+    p = subprocess.run(
+        args,
+        env=conda_env_override(platform),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf8",
+    )
+
+    try:
+        res = json.loads(p.stdout)
+    except JSONDecodeError:
+        click.secho("\nFailed to lock the environment\n", fg="red", file=sys.stderr)
+        print(p.stdout.strip())
+        exit(1)
+
+    if p.returncode != 0:
+        exception_name = res.get("exception_name", None)
+
+        line = click.style("\nFailed to lock the environment", fg="red")
+        if exception_name:
+            line += " " + click.style(f"[{exception_name}]", fg="bright_white")
+        print(line + "\n", file=sys.stderr)
+
+        if exception_name == "PackagesNotFoundError":
+            pkg_names = res["packages"]
+            print(f"The following packages are not available from current channels:\n", file=sys.stderr)
+            for pkg_name in pkg_names:
+                print(f"- {pkg_name}", file=sys.stderr)
+            sys.exit(1)
+
+        if exception_name == "UnsatisfiableError":
+            res_ = parse_unsatisfiable_error(res["message"])
+            if res_:
+                incompatible = set()
+                for pkg_name, info in res_.items():
+                    if not info["compatible"]:
+                        incompatible.add(pkg_name)
+                    print(
+                        "Cannot determine version of" if info["compatible"] else "Cannot find package",
+                        click.style(pkg_name, fg=COLORS["name"] if info["compatible"] else "red"),
+                        *([click.style(info['spec'], fg=COLORS['version'])] if info["spec"] else []),
+                        file=sys.stderr,
+                    )
+                    for child_name, child_ver, dep_name, dep_ver in info["children"]:
+                        print(
+                            f"-",
+                            click.style(child_name, fg=COLORS["name"]),
+                            click.style(child_ver, fg=COLORS['version']),
+                            "requires",
+                            click.style(dep_name, fg=COLORS["name"] if info["compatible"] else "red"),
+                            click.style(dep_ver or "", fg=COLORS['version']),
+                            file=sys.stderr,
+                        )
+                    print(file=sys.stderr)
+                
+                incompatible = sorted(incompatible)
+                if len(incompatible) == 1:
+                    pkg_name = incompatible[0]
+                    print(f"The root cause may be that {click.style(pkg_name, fg='red')} is unavailable on this platform", file=sys.stderr)
+                elif len(incompatible) > 1:
+                    pkg_names = ", ".join([click.style(pkg_name, fg='red') for pkg_name in incompatible])
+                    print(f"The root cause may be that these packages are unavailble on this platform:", pkg_names, file=sys.stderr)
+                sys.exit(1)
+
+        if "message" in res:
+            print(res["message"], file=sys.stderr)
+            sys.exit(1)
+
+        print(json.dumps(res, indent=2), file=sys.stderr)
+        sys.exit(1)
+
+    return res
+
+
+def create_lockfile_from_spec(
+    *,
+    spec: LockSpecification,
+) -> List[str]:
+    exe = system_exe()
+    dry_run_install = solve_specs_for_arch(
+        platform=spec.platform,
+        channels=spec.channels,
+        specs=spec.specs,
+    )
+
+    lockfile_contents = [
+        "# Generated by conda-lock.",
+        f"# platform: {spec.platform}",
+        f"# env_hash: {spec.env_hash()}\n",
+        "@EXPLICIT\n",
+    ]
+
+    link_actions = dry_run_install["actions"]["LINK"]
+    for link in link_actions:
+        if is_micromamba(exe):
+            link["url_base"] = fn_to_dist_name(link["url"])
+            link["dist_name"] = fn_to_dist_name(link["fn"])
+        else:
+            link["url_base"] = f"{link['base_url']}/{link['platform']}/{link['dist_name']}"
+
+        link["url"] = f"{link['url_base']}.tar.bz2"
+        link["url_conda"] = f"{link['url_base']}.conda"
+    link_dists = {link["dist_name"] for link in link_actions}
+
+    fetch_actions = dry_run_install["actions"]["FETCH"]
+
+    fetch_by_dist_name = {fn_to_dist_name(pkg["fn"]): pkg for pkg in fetch_actions}
+
+    non_fetch_packages = link_dists - set(fetch_by_dist_name)
+    if len(non_fetch_packages) > 0:
+        for search_res in search_for_md5s(
+                conda=exe,
+                package_specs=[x for x in link_actions if x["dist_name"] in non_fetch_packages],
+                platform=spec.platform,
+                channels=spec.channels,
+        ):
+            dist_name = fn_to_dist_name(search_res["fn"])
+            fetch_by_dist_name[dist_name] = search_res
+
+    for pkg in link_actions:
+        dist_name = (fn_to_dist_name(pkg["fn"]) if is_micromamba(exe) else pkg["dist_name"])
+        url = fetch_by_dist_name[dist_name]["url"]
+        md5 = fetch_by_dist_name[dist_name]["md5"]
+        lockfile_contents.append(f"{url}#{md5}")
+
+    def sanitize_lockfile_line(line):
+        line = line.strip()
+        if line == "":
+            return "#"
+        else:
+            return line
+
+    lockfile_contents = [sanitize_lockfile_line(line) for line in lockfile_contents]
+
+    return lockfile_contents
 
 
 def env_info():
@@ -125,12 +333,7 @@ def _env_lock_conda():
             file=sys.stderr,
         )
         lock_spec = parse_environment_file(spec_file(), platform)
-        lock_contents = create_lockfile_from_spec(
-            channels=lock_spec.channels,
-            conda=system_exe(),
-            spec=lock_spec,
-            kind="explicit",
-        )
+        lock_contents = create_lockfile_from_spec(spec=lock_spec)
         with open(conda_lock_file(platform), "w") as f:
             f.write("\n".join(lock_contents) + "\n")
 
@@ -255,6 +458,12 @@ def _env_install_pip():
 
 def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool = False, show: bool = False):
     require_spec_file()
+
+    sys_platform = system_platform()
+    if sys_platform not in spec_platform_names(quiet=True):
+        click.secho(f"Cannot install because {sys_platform} is not whitelisted in {spec_file()}", fg="red", file=sys.stderr)
+        click.secho(f"You can add it with: `coman platform add {sys_platform}`", fg="red", file=sys.stderr)
+        exit(1)
 
     old_pkgs = env_show(deps=True, only_return=True) if show and env_prefix().exists() else []
 

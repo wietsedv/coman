@@ -106,12 +106,12 @@ def spec_platforms() -> List[dict]:
     return platforms
 
 
-def spec_platform_names() -> List[str]:
+def spec_platform_names(quiet: bool = False) -> List[str]:
     sys_platform = system_platform()
     with open(require_spec_file()) as f:
         env = yaml.safe_load(f)
     platform_names = env.get("platforms", [sys_platform])
-    if sys_platform not in platform_names:
+    if not quiet and sys_platform not in platform_names:
         click.secho(f"WARNING: Platform {sys_platform} is not whitelisted in {spec_file()}\n",
                     fg="yellow",
                     file=sys.stderr)
