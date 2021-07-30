@@ -62,6 +62,8 @@ cm show
 
 # run a command (use -- to avoid argument conflicts)
 cm run -- python --version
+cm python -- --version  # available for bash and python
+coman-python --version  # available for bash and python
 
 # activate your environment in your current shell (at least works with bash and zsh)
 cm shell
