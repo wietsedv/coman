@@ -1,27 +1,26 @@
-from distutils.version import LooseVersion
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 from glob import glob
-from typing import Any, Dict, Iterator, List, Optional
+from pathlib import Path
+from typing import Iterator, List, Optional
 
+import click
 import ruamel.yaml as yaml
 from conda_lock.conda_lock import create_lockfile_from_spec
 from conda_lock.src_parser import LockSpecification
-import click
-from semantic_version import Version, SimpleSpec
+from semantic_version import SimpleSpec, Version
 
-from coman.spec import (conda_lock_file, conda_outdated, conda_lock_hash, pip_lock_comments,
-                        pip_lock_file, pip_lock_hash, pip_outdated, require_spec_file, spec_channel_names, spec_file,
+from coman._version import __version__
+from coman.spec import (conda_lock_file, conda_lock_hash, conda_outdated, pip_lock_comments, pip_lock_file,
+                        pip_lock_hash, pip_outdated, require_spec_file, spec_channel_names, spec_file,
                         spec_package_names, spec_pip_requirements, spec_platform_names)
 from coman.system import (conda_info, conda_pkg_info, conda_root, conda_search, env_prefix, envs_dir, pkgs_dir, run_exe,
                           system_exe, system_platform)
 from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
-from coman._version import __version__
 
 
 def env_python_exe():
@@ -445,7 +444,8 @@ def env_search(pkg: str, platform: Optional[str], limit: int, deps: bool):
         cols = ["name", "version", "build", "channel", "platform"]
         if deps:
             for pkg_info in pkg_infos:
-                pkg_info["depends"] = pkg_info["depends"] = "\n" + "".join([f"- {dep}\n" for dep in pkg_info["depends"]])
+                pkg_info["depends"] = pkg_info["depends"] = "\n" + "".join(
+                    [f"- {dep}\n" for dep in pkg_info["depends"]])
             cols.append("depends")
 
         col_lengths = pkg_col_lengths(pkg_infos, cols)
@@ -468,7 +468,7 @@ def env_init():
     pkg_str = f"{pkg_info['name']} >={pkg_info['version']}"
 
     with open(spec_file(), "w") as f:
-        f.write(f"channels:\n- conda-forge\n\nplatforms:\n- {system_platform()}\n\ndependencies:\n- {pkg_str}\n")
+        f.write(f"channels:\n- conda-forge\nplatforms:\n- {system_platform()}\ndependencies:\n- {pkg_str}\n")
 
     print(file=sys.stderr)
     env_lock()

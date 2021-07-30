@@ -6,8 +6,8 @@ from typing import List, Optional
 import click
 
 from coman.env import (env_info, env_init, env_install, env_lock, env_python_exe, env_search, env_show, env_uninstall)
-from coman.system import (conda_exe, env_name, env_prefix, envs_dir, is_conda, is_micromamba, micromamba_exe, pkgs_dir, system_exe,
-                          system_platform)
+from coman.system import (conda_exe, env_name, env_prefix, envs_dir, is_conda, is_micromamba, micromamba_exe, pkgs_dir,
+                          system_exe, system_platform)
 from coman.commands import spec
 from coman.commands.utils import NaturalOrderGroup
 
@@ -164,10 +164,8 @@ def run(install: bool, args: List[str]):
     env_run(args)
 
 
-@cli.command()
-@click.option("--install/--no-install", default=True)
-@click.argument("args", nargs=-1)
-def bash(install: bool, args: List[str]):
+def run_bash(install: bool = True, args: List[str] = None):
+    args = args or sys.argv[1:]
     if install:
         env_install(quiet=True)
     env_run(["bash", *args])
@@ -176,7 +174,12 @@ def bash(install: bool, args: List[str]):
 @cli.command()
 @click.option("--install/--no-install", default=True)
 @click.argument("args", nargs=-1)
-def python(install: bool, args: List[str]):
+def bash(install: bool, args: List[str]):
+    run_bash(install, args)
+
+
+def run_python(install: bool = True, args: List[str] = None):
+    args = args or sys.argv[1:]
     if install:
         env_install(quiet=True)
     python_exe = env_python_exe()
@@ -184,6 +187,13 @@ def python(install: bool, args: List[str]):
         click.secho("The python executable is unreachable. Have you installed the environment?", fg="red")
         exit(1)
     exit(subprocess.run([python_exe, *args]).returncode)
+
+
+@cli.command()
+@click.option("--install/--no-install", default=True)
+@click.argument("args", nargs=-1)
+def python(install: bool, args: List[str]):
+    run_python()
 
 
 @cli.command()
