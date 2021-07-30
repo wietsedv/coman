@@ -453,8 +453,8 @@ def env_search(pkg: str, platform: Optional[str], limit: int, deps: bool):
             print(format_pkg_line(pkg_info, col_lengths, bold=j == len(pkg_infos)))
 
 
-def env_init():
-    if spec_file().exists():
+def env_init(force: bool):
+    if not force and spec_file().exists():
         print(f"Specification file `{spec_file()}` already exists", file=sys.stderr)
         exit(1)
 
@@ -465,10 +465,12 @@ def env_init():
         file=sys.stderr,
     )
     pkg_info = conda_pkg_info("python", channels=["conda-forge"])
-    pkg_str = f"{pkg_info['name']} >={pkg_info['version']}"
+
+    v = Version(pkg_info['version'])
+    pkg_str = f"{pkg_info['name']} >={v},<={v.next_minor()}"
 
     with open(spec_file(), "w") as f:
-        f.write(f"channels:\n- conda-forge\nplatforms:\n- {system_platform()}\ndependencies:\n- {pkg_str}\n")
+        f.write(f"platforms:\n- {system_platform()}\nchannels:\n- conda-forge\ndependencies:\n- {pkg_str}\n")
 
     print(file=sys.stderr)
     env_lock()

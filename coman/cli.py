@@ -53,11 +53,12 @@ def info(name: bool, prefix: bool, platform: bool, conda_exe: bool, python_exe: 
 
 
 @cli.command()
-def init():
+@click.option("--force", default=False, is_flag=True)
+def init(force: bool):
     """
     Initialize a new environment.yml
     """
-    env_init()
+    env_init(force=force)
 
 
 @cli.command()
