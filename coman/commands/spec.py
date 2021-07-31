@@ -4,7 +4,7 @@ from typing import List, Optional
 
 import click
 from coman.env import env_install, env_lock
-from coman.spec import PLATFORMS, Specification, spec_channels, spec_dependencies, spec_platforms
+from coman.spec import PLATFORMS, Specification
 from coman.system import Conda, conda_pkg_info, pypi_pkg_info
 from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
 
@@ -187,16 +187,16 @@ def add_update_options(fn):
 @click.command("list")
 def dependency_list():
     spec = Specification()
-    conda_pkgs, pip_pkgs = spec_dependencies(spec)
-    col_lengths = pkg_col_lengths(conda_pkgs + pip_pkgs, ["name", "version", "comment"])
+    conda_infos, pip_infos = spec.dependency_infos()
+    col_lengths = pkg_col_lengths(conda_infos + pip_infos, ["name", "version", "comment"])
 
     click.secho("Conda", fg="green", bold=True)
-    for pkg_info in conda_pkgs:
+    for pkg_info in conda_infos:
         print(f"- {format_pkg_line(pkg_info, col_lengths)}")
 
-    if pip_pkgs:
+    if pip_infos:
         click.secho("\nPip", fg="cyan", bold=True)
-        for pkg_info in pip_pkgs:
+        for pkg_info in pip_infos:
             print(f"- {format_pkg_line(pkg_info, col_lengths)}")
 
 
@@ -237,7 +237,7 @@ def dependency_remove(conda: Conda, pkgs: List[str], pip: bool, update: Optional
 @click.pass_obj
 def platform_list(conda: Conda):
     spec = Specification()
-    platforms = spec_platforms(spec, conda.env.platform)
+    platforms = spec.platform_infos(conda.env.platform)
     col_lengths = pkg_col_lengths(platforms, ["platform", "comment"])
     for platform in platforms:
         print(f"- {format_pkg_line(platform, col_lengths)}")
@@ -274,7 +274,7 @@ def platform_remove(conda: Conda, platforms: List[str], update: Optional[bool], 
 @click.command("list")
 def channel_list():
     spec = Specification()
-    channels = spec_channels(spec)
+    channels = spec.channel_infos()
     col_lengths = pkg_col_lengths(channels, ["channel", "comment"])
     for channel in channels:
         print(f"- {format_pkg_line(channel, col_lengths)}")

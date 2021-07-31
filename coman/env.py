@@ -17,8 +17,8 @@ from conda_lock.src_parser import LockSpecification
 from semantic_version import SimpleSpec, Version
 
 from coman._version import __version__
-from coman.spec import (Specification, conda_lock_file, conda_lock_hash, pip_lock_comments, pip_lock_file, pip_lock_hash,
-                        spec_channel_names, spec_dependency_names, spec_pip_requirements, spec_platform_names)
+from coman.spec import (Specification, conda_lock_file, conda_lock_hash, pip_lock_comments, pip_lock_file,
+                        pip_lock_hash, spec_pip_requirements)
 from coman.system import Conda, conda_exe, conda_info, conda_pkg_info, conda_search, micromamba_exe
 from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
 
@@ -83,29 +83,6 @@ def parse_unsatisfiable_error(msg: str):
                     incompatible.add(spec_name)
                     conflicts[dep_name]["compatible"] = False
                 conflicts[dep_name]["children"].append((spec_name, spec_ver, dep_name, dep_ver))
-
-    # def _prune_conflicts(conflicts, names):
-    #     for name in names:
-    #         incompatible.add(name)
-    #         if name not in conflicts:
-    #             continue
-
-    #         child_names = [child[0] for child in conflicts[name]["children"]]
-    #         if child_names:
-    #             _prune_conflicts(conflicts, child_names)
-
-    #         del conflicts[name]
-
-    # _prune_conflicts(conflicts, list(incompatible))
-
-    # for dep_name in list(conflicts.keys()):
-    #     if not conflicts[dep_name]["compatible"]:
-    #         continue
-    #     for child in conflicts[dep_name]["children"]:
-    #         if child[0] in incompatible:
-    #             del conflicts[dep_name]
-    #             break
-
     return conflicts
 
 
@@ -309,7 +286,7 @@ def env_info(conda: Conda, spec: Specification):
 
 
 def _env_lock_conda(conda: Conda, spec: Specification):
-    platforms = spec_platform_names(spec, conda.env.platform)
+    platforms = spec.platforms(conda.env.platform)
     if conda.env.platform not in platforms:
         click.secho(f"WARNING: Platform {conda.env.platform} is not whitelisted in {spec.spec_file}\n",
                     fg="yellow",
@@ -464,7 +441,7 @@ def env_install(conda: Conda,
                 force: bool = False,
                 quiet: bool = False,
                 show: bool = False):
-    if conda.env.platform not in spec_platform_names(spec, conda.env.platform):
+    if conda.env.platform not in spec.platforms(conda.env.platform):
         click.secho(f"Cannot install because {conda.env.platform} is not whitelisted in {spec.spec_file}",
                     fg="red",
                     file=sys.stderr)
@@ -586,7 +563,7 @@ def env_show(conda: Conda,
         print("No results", file=sys.stderr)
         exit(1)
 
-    conda_names, pip_names = spec_dependency_names(spec)
+    conda_names, pip_names = spec.dependencies()
 
     pkg_infos = json.loads(p.stdout)
     if pip is False:
@@ -622,8 +599,8 @@ def env_show(conda: Conda,
 
 
 def env_search(conda: Conda, spec: Specification, pkg: str, platform: Optional[str], limit: int, deps: bool):
-    platforms = [platform] if platform else spec_platform_names(spec, conda.env.platform)
-    channels = spec_channel_names(spec)
+    platforms = [platform] if platform else spec.platforms(conda.env.platform)
+    channels = spec.channels()
 
     python_ver = conda.env.python_version
     if python_ver:

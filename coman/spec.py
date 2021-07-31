@@ -18,6 +18,7 @@ def conda_lock_file(platform: str):
 def pip_lock_file():
     return Path("requirements.txt")
 
+
 class Specification:
     def __init__(self) -> None:
         self.spec_file = Path("environment.yml")
@@ -40,10 +41,66 @@ class Specification:
             if "dependencies" not in self.data:
                 self.data["dependencies"] = []
         return self.data
-    
+
     def write(self):
         with open(self.spec_file, "w") as f:
             self._yaml.dump(self.data, f)
+
+    def dependencies(self) -> Tuple[List[str], List[str]]:
+        spec_data = self.read()
+        conda_names, pip_names = [], []
+        for pkg in spec_data["dependencies"]:
+            if isinstance(pkg, str):
+                conda_names.append(pkg.split(" ")[0])
+            elif isinstance(pkg, dict) and "pip" in pkg:
+                for pip_pkg in pkg["pip"]:
+                    pip_names.append(pip_pkg.split(" ")[0])
+        return conda_names, pip_names
+
+    def platforms(self, default: str) -> List[str]:
+        spec_data = self.read()
+        platform_names = spec_data.get("platforms", [default])
+        return platform_names
+
+    def channels(self) -> List[str]:
+        spec_data = self.read()
+        return spec_data.get("channels", ["conda-forge"])
+
+    def dependency_infos(self) -> Tuple[List[dict], List[dict]]:
+        spec_data = self.read()
+        conda_comments = spec_data["dependencies"].ca.items
+        conda_infos, pip_infos = [], []
+        for i, pkg in enumerate(spec_data["dependencies"]):
+            if isinstance(pkg, str):
+                name, ver = pkg.split()
+                comment = conda_comments[i][0].value.strip() if i in conda_comments else ""
+                conda_infos.append({"name": name, "version": ver, "comment": comment})
+            elif isinstance(pkg, dict) and "pip" in pkg:
+                pip_comments = spec_data["dependencies"][i]["pip"].ca.items
+                for j, pip_pkg in enumerate(pkg["pip"]):
+                    if isinstance(pip_pkg, str):
+                        name, ver = pip_pkg.split()
+                        comment = pip_comments[j][0].value.strip() if j in pip_comments else ""
+                        pip_infos.append({"name": name, "channel": "pypi", "version": ver, "comment": comment})
+        return conda_infos, pip_infos
+
+    def platform_infos(self, default: str) -> List[dict]:
+        platforms = _yaml_info_list(self.read(), "platforms", "platform") or [{"platform": default}]
+        return platforms
+
+    def channel_infos(self) -> List[dict]:
+        return _yaml_info_list(self.read(), "channels", "channel") or [{"channel": "conda-forge"}]
+
+
+def _yaml_info_list(data, key: str, item_key: str) -> Optional[List[dict]]:
+    if key not in data:
+        return
+    comments = data[key].ca.items
+    items = []
+    for i, item in enumerate(data[key]):
+        comment = comments[i][0].value.strip() if i in comments else ""
+        items.append({item_key: item, "comment": comment})
+    return items
 
 
 def spec_pip_requirements(spec: Specification):
@@ -58,72 +115,6 @@ def spec_pip_requirements(spec: Specification):
                 else:
                     pip_pkgs.append(pkg)
             return "\n".join(pip_pkgs)
-    
-
-def spec_dependencies(spec: Specification) -> Tuple[List[dict], List[dict]]:
-    spec_data = spec.read()["dependencies"]
-    conda_comments = spec_data["dependencies"].ca.items
-    conda_specs, pip_specs = [], []
-    for i, pkg in enumerate(spec_data["dependencies"]):
-        if isinstance(pkg, str):
-            name, ver = pkg.split()
-            comment = conda_comments[i][0].value.strip() if i in conda_comments else ""
-            conda_specs.append({"name": name, "version": ver, "comment": comment})
-            continue
-
-        if isinstance(pkg, dict) and "pip" in pkg:
-            pip_comments = spec_data["dependencies"][i]["pip"].ca.items
-            for j, pip_pkg in enumerate(pkg["pip"]):
-                if isinstance(pip_pkg, str):
-                    name, ver = pip_pkg.split()
-                    comment = pip_comments[j][0].value.strip() if j in pip_comments else ""
-                    pip_specs.append({"name": name, "channel": "pypi", "version": ver, "comment": comment})
-    return conda_specs, pip_specs
-
-
-def spec_dependency_names(spec: Specification) -> Tuple[List[str], List[str]]:
-    spec_data = spec.read()
-    conda_names, pip_names = [], []
-    for pkg in spec_data["dependencies"]:
-        if isinstance(pkg, str):
-            conda_names.append(pkg.split(" ")[0])
-        if isinstance(pkg, dict) and "pip" in pkg:
-            for pip_pkg in pkg["pip"]:
-                pip_names.append(pip_pkg.split(" ")[0])
-    return conda_names, pip_names
-
-
-def _spec_load_list(spec: Specification, key: str, item_key: str, default: List[dict] = []) -> List[dict]:
-    spec_data = spec.read()
-    if key not in spec_data:
-        return default
-
-    comments = spec_data[key].ca.items
-    items = []
-    for i, item in enumerate(spec_data[key]):
-        comment = comments[i][0].value.strip() if i in comments else ""
-        items.append({item_key: item, "comment": comment})
-    return items
-
-
-def spec_platforms(spec: Specification, default: str) -> List[dict]:
-    platforms = _spec_load_list(spec, "platforms", "platform", default=[{"platform": default}])
-    return platforms
-
-
-def spec_platform_names(spec: Specification, default: str) -> List[str]:
-    spec_data = spec.read()
-    platform_names = spec_data.get("platforms", [default])
-    return platform_names
-
-
-def spec_channels(spec: Specification) -> List[dict]:
-    return _spec_load_list(spec, "channels", "channel", default=[{"channel": "conda-forge"}])
-
-
-def spec_channel_names(spec: Specification) -> List[str]:
-    spec_data = spec.read()
-    return spec_data.get("channels", ["conda-forge"])
 
 
 def conda_lock_hash(platform: str) -> str:
