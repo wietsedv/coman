@@ -1,11 +1,9 @@
-from coman.system import env_prefix_conda_hash, env_prefix_pip_hash, system_platform
 import re
-from pathlib import Path
 import sys
-from typing import Callable, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-import ruamel.yaml as yaml
-import click
+import ruamel.yaml
 
 ENV_HASH_PATTERN = re.compile(r"^# env_hash: (.*)$")
 PLATFORM_PATTERN = re.compile(r"^# platform: (.*)$")
@@ -13,24 +11,44 @@ PLATFORM_PATTERN = re.compile(r"^# platform: (.*)$")
 PLATFORMS = ["linux-64", "linux-aarch64", "linux-ppc64le", "osx-64", "osx-arm64", "win-64"]
 
 
-def spec_file():
-    return Path("environment.yml")
+def conda_lock_file(platform: str):
+    return Path(f"conda-{platform}.lock")
 
 
-def require_spec_file():
-    spec_path = spec_file()
-    if not spec_path.exists():
-        print(f"Specification file `{spec_file()}` is not found in the current directory. Create it with `coman init`",
-              file=sys.stderr)
-        exit(1)
-    return spec_path
+def pip_lock_file():
+    return Path("requirements.txt")
+
+class Specification:
+    def __init__(self) -> None:
+        self.spec_file = Path("environment.yml")
+        self.data = None
+        self._yaml = ruamel.yaml.YAML()
+
+    def read(self) -> Dict[str, Any]:
+        if self.data is None:
+            if not self.spec_file.exists():
+                print(
+                    f"Specification file `{self.spec_file}` is not found in the current directory. Create it with `coman init`",
+                    file=sys.stderr)
+                exit(1)
+
+            with open(self.spec_file) as f:
+                self.data = self._yaml.load(f)
+
+            if "channels" not in self.data:
+                self.data["channels"] = ["conda-forge"]
+            if "dependencies" not in self.data:
+                self.data["dependencies"] = []
+        return self.data
+    
+    def write(self):
+        with open(self.spec_file, "w") as f:
+            self._yaml.dump(self.data, f)
 
 
-def spec_pip_requirements() -> Optional[str]:
-    with open(require_spec_file()) as f:
-        env = yaml.safe_load(f)
-
-    for pkg in env["dependencies"]:
+def spec_pip_requirements(spec: Specification):
+    spec_data = spec.read()
+    for pkg in spec_data["dependencies"]:
         if isinstance(pkg, dict) and "pip" in pkg:
             pip_pkgs = []
             for pkg in pkg["pip"]:
@@ -40,15 +58,33 @@ def spec_pip_requirements() -> Optional[str]:
                 else:
                     pip_pkgs.append(pkg)
             return "\n".join(pip_pkgs)
-    return None
+    
+
+def spec_dependencies(spec: Specification) -> Tuple[List[dict], List[dict]]:
+    spec_data = spec.read()["dependencies"]
+    conda_comments = spec_data["dependencies"].ca.items
+    conda_specs, pip_specs = [], []
+    for i, pkg in enumerate(spec_data["dependencies"]):
+        if isinstance(pkg, str):
+            name, ver = pkg.split()
+            comment = conda_comments[i][0].value.strip() if i in conda_comments else ""
+            conda_specs.append({"name": name, "version": ver, "comment": comment})
+            continue
+
+        if isinstance(pkg, dict) and "pip" in pkg:
+            pip_comments = spec_data["dependencies"][i]["pip"].ca.items
+            for j, pip_pkg in enumerate(pkg["pip"]):
+                if isinstance(pip_pkg, str):
+                    name, ver = pip_pkg.split()
+                    comment = pip_comments[j][0].value.strip() if j in pip_comments else ""
+                    pip_specs.append({"name": name, "channel": "pypi", "version": ver, "comment": comment})
+    return conda_specs, pip_specs
 
 
-def spec_package_names() -> Tuple[List[str], List[str]]:
-    with open(require_spec_file()) as f:
-        env = yaml.safe_load(f)
-
+def spec_dependency_names(spec: Specification) -> Tuple[List[str], List[str]]:
+    spec_data = spec.read()
     conda_names, pip_names = [], []
-    for pkg in env["dependencies"]:
+    for pkg in spec_data["dependencies"]:
         if isinstance(pkg, str):
             conda_names.append(pkg.split(" ")[0])
         if isinstance(pkg, dict) and "pip" in pkg:
@@ -57,99 +93,46 @@ def spec_package_names() -> Tuple[List[str], List[str]]:
     return conda_names, pip_names
 
 
-def spec_dependencies() -> Tuple[List[dict], List[dict]]:
-    with open(require_spec_file()) as f:
-        env = yaml.round_trip_load(f)
-
-    conda_comments = env["dependencies"].ca.items
-    conda_specs, pip_specs = [], []
-    for i, pkg in enumerate(env["dependencies"]):
-        if isinstance(pkg, str):
-            name, ver = pkg.split()
-            comment = conda_comments[i][0].value.strip() if i in conda_comments else ""
-            conda_specs.append({"name": name, "version": ver, "comment": comment})
-            continue
-
-        if isinstance(pkg, dict) and "pip" in pkg:
-            pip_comments = env["dependencies"][i]["pip"].ca.items
-            for j, pip_pkg in enumerate(pkg["pip"]):
-                if isinstance(pip_pkg, str):
-                    name, ver = pip_pkg.split()
-                    comment = pip_comments[j][0].value.strip() if j in pip_comments else ""
-                    pip_specs.append({"name": name, "channel": "pypi", "version": ver, "comment": comment})
-
-    return conda_specs, pip_specs
-
-
-def _spec_load_list(key: str, item_key: str, default: List[dict] = []) -> List[dict]:
-    if not spec_file().exists():
+def _spec_load_list(spec: Specification, key: str, item_key: str, default: List[dict] = []) -> List[dict]:
+    spec_data = spec.read()
+    if key not in spec_data:
         return default
 
-    with open(spec_file()) as f:
-        env = yaml.round_trip_load(f)
-
-    if key not in env:
-        return default
-
-    comments = env[key].ca.items
+    comments = spec_data[key].ca.items
     items = []
-    for i, item in enumerate(env[key]):
+    for i, item in enumerate(spec_data[key]):
         comment = comments[i][0].value.strip() if i in comments else ""
         items.append({item_key: item, "comment": comment})
     return items
 
 
-
-def spec_platforms() -> List[dict]:
-    sys_platform = system_platform()
-    platforms = _spec_load_list("platforms", "platform", default=[{"platform": sys_platform}])
+def spec_platforms(spec: Specification, default: str) -> List[dict]:
+    platforms = _spec_load_list(spec, "platforms", "platform", default=[{"platform": default}])
     return platforms
 
 
-def spec_platform_names(quiet: bool = False) -> List[str]:
-    sys_platform = system_platform()
-    with open(require_spec_file()) as f:
-        env = yaml.safe_load(f)
-    platform_names = env.get("platforms", [sys_platform])
-    if not quiet and sys_platform not in platform_names:
-        click.secho(f"WARNING: Platform {sys_platform} is not whitelisted in {spec_file()}\n",
-                    fg="yellow",
-                    file=sys.stderr)
+def spec_platform_names(spec: Specification, default: str) -> List[str]:
+    spec_data = spec.read()
+    platform_names = spec_data.get("platforms", [default])
     return platform_names
 
 
-def spec_channels() -> List[dict]:
-    return _spec_load_list("channels", "channel", default=[{"channel": "conda-forge"}])
+def spec_channels(spec: Specification) -> List[dict]:
+    return _spec_load_list(spec, "channels", "channel", default=[{"channel": "conda-forge"}])
 
 
-def spec_channel_names() -> List[str]:
-    spec_path = require_spec_file()
-    with open(spec_path) as f:
-        env = yaml.safe_load(f)
-    return env.get("channels", ["conda-forge"])
+def spec_channel_names(spec: Specification) -> List[str]:
+    spec_data = spec.read()
+    return spec_data.get("channels", ["conda-forge"])
 
 
-def conda_lock_file(platform: Optional[str] = None):
-    platform = platform or system_platform()
-    return Path(f"conda-{platform}.lock")
-
-
-def pip_lock_file():
-    return Path("requirements.txt")
-
-
-def conda_lock_hash() -> str:
-    with open(conda_lock_file()) as f:
+def conda_lock_hash(platform: str) -> str:
+    with open(conda_lock_file(platform)) as f:
         for line in f:
             m = ENV_HASH_PATTERN.search(line)
             if m:
                 return m.group(1)
         raise RuntimeError("Cannot find env_hash in conda lock file")
-
-
-def conda_outdated(conda_hash: Optional[str] = None):
-    conda_hash = conda_hash or conda_lock_hash()
-    return env_prefix_conda_hash() != conda_hash
 
 
 def pip_lock_hash() -> Optional[str]:
@@ -194,27 +177,3 @@ def pip_lock_comments():
             comments[name] = comment
 
     return comments
-
-
-def pip_outdated(pip_hash: Optional[str] = None):
-    pip_hash = pip_hash or pip_lock_hash()
-    return env_prefix_pip_hash() != pip_hash
-
-
-def edit_spec_file() -> Tuple[dict, Callable]:
-    spec_path = require_spec_file()
-
-    yaml_ = yaml.YAML()
-    with open(spec_path) as f:
-        spec_data = yaml_.load(f)
-
-    if "channels" not in spec_data:
-        spec_data["channels"] = ["conda-forge"]
-    if "dependencies" not in spec_data:
-        spec_data["dependencies"] = ["python"]
-
-    def save_func():
-        with open(spec_path, "w") as f:
-            yaml_.dump(spec_data, f)
-
-    return spec_data, save_func

@@ -1,18 +1,16 @@
-from collections import OrderedDict
-from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
 import sys
-from coman.env import env_install, env_lock
+from collections import OrderedDict
 from typing import List, Optional
 
 import click
+from coman.env import env_install, env_lock
+from coman.spec import PLATFORMS, Specification, spec_channels, spec_dependencies, spec_platforms
+from coman.system import Conda, conda_pkg_info, pypi_pkg_info
+from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
 
-from coman.spec import PLATFORMS, edit_spec_file, spec_channels, spec_dependencies, spec_platforms
-from coman.system import conda_pkg_info, env_prefix, pypi_pkg_info
-from coman.commands.utils import NaturalOrderGroup
 
-
-def change_dependencies(*, add_pkgs: List[str], remove_pkgs: List[str], pip: bool):
-    spec_data, save_spec_file = edit_spec_file()
+def change_dependencies(conda: Conda, spec: Specification, add_pkgs: List[str], remove_pkgs: List[str], pip: bool):
+    spec_data = spec.read()
 
     def _dep_names(deps):
         return [pkg.split(" ")[0] if not isinstance(pkg, OrderedDict) else None for pkg in deps]
@@ -31,7 +29,7 @@ def change_dependencies(*, add_pkgs: List[str], remove_pkgs: List[str], pip: boo
                 name, ver = pkg_info["name"], pkg_info["version"]
                 pkg_spec = f"{name} >={ver}"
         else:
-            pkg_info = conda_pkg_info(pkg, channels=spec_data["channels"])
+            pkg_info = conda_pkg_info(conda, pkg, channels=spec_data["channels"])
             name, ver = pkg_info["name"], pkg_info["version"]
             pkg_spec = f"{name} >={ver}"
 
@@ -63,18 +61,19 @@ def change_dependencies(*, add_pkgs: List[str], remove_pkgs: List[str], pip: boo
         return True
 
     changed = False
-    conda = not pip
+    lock_pip = pip
+    conda_ = not pip
     if pip:
         if "pip" not in dep_names:
-            conda = _add_pkg("pip", pip=False)
+            conda_ = _add_pkg("pip", pip=False)
             changed = True
 
         pip_deps = None
-        for spec in deps:
-            if isinstance(spec, OrderedDict) and "pip" in spec:
-                if not spec["pip"]:
-                    spec["pip"] = []
-                pip_deps = spec["pip"]
+        for pkg in deps:
+            if isinstance(pkg, OrderedDict) and "pip" in pkg:
+                if not pkg["pip"]:
+                    pkg["pip"] = []
+                pip_deps = pkg["pip"]
                 break
         if pip_deps is None:
             deps.append(dict(pip=[]))
@@ -100,31 +99,33 @@ def change_dependencies(*, add_pkgs: List[str], remove_pkgs: List[str], pip: boo
                   click.style("No dependencies removed", fg="yellow"),
                   file=sys.stderr)
 
-    save_spec_file()
-    return changed and conda, changed and pip
+    spec.write()
+    return changed and conda_, changed and pip
 
 
-def save_env(update: Optional[bool],
+def save_env(conda: Conda,
+             spec: Specification,
+             update: Optional[bool],
              install: Optional[bool],
              prune: Optional[bool],
              force: bool,
              show: bool,
-             conda: bool = True,
-             pip: bool = False):
+             lock_conda: bool = True,
+             lock_pip: bool = False):
     if update is not False:
         print(file=sys.stderr)
-        env_lock(conda=update or conda, pip=update or pip)
+        env_lock(conda, spec, lock_conda=update or lock_conda, lock_pip=update or lock_pip)
 
     if install is None:
-        install = env_prefix().exists()
+        install = conda.env.prefix.exists()
 
     if update is not False and install:
         print(file=sys.stderr)
-        env_install(prune=prune, force=force, show=show)
+        env_install(conda, spec, prune=prune, force=force, show=show)
 
 
-def spec_list_add(items: List[str], key: str, item_key: str, prepend: bool=False):
-    spec_data, save_spec_file = edit_spec_file()
+def spec_list_add(spec: Specification, items: List[str], key: str, item_key: str, prepend: bool = False):
+    spec_data = spec.read()
 
     changed = False
     for item in (reversed(items) if prepend else items):
@@ -144,12 +145,12 @@ def spec_list_add(items: List[str], key: str, item_key: str, prepend: bool=False
               click.style(f"No new {key} added", fg="yellow"),
               file=sys.stderr)
 
-    save_spec_file()
+    spec.write()
     return changed
 
 
-def spec_list_remove(items: List[str], key: str, item_key: str):
-    spec_data, save_spec_file = edit_spec_file()
+def spec_list_remove(spec: Specification, items: List[str], key: str, item_key: str):
+    spec_data = spec.read()
 
     changed = False
     for item in items:
@@ -166,7 +167,7 @@ def spec_list_remove(items: List[str], key: str, item_key: str):
               click.style(f"No {key} removed", fg="yellow"),
               file=sys.stderr)
 
-    save_spec_file()
+    spec.write()
     return changed
 
 
@@ -184,8 +185,9 @@ def add_update_options(fn):
 
 
 @click.command("list")
-def list_deps():
-    conda_pkgs, pip_pkgs = spec_dependencies()
+def dependency_list():
+    spec = Specification()
+    conda_pkgs, pip_pkgs = spec_dependencies(spec)
     col_lengths = pkg_col_lengths(conda_pkgs + pip_pkgs, ["name", "version", "comment"])
 
     click.secho("Conda", fg="green", bold=True)
@@ -198,100 +200,113 @@ def list_deps():
             print(f"- {format_pkg_line(pkg_info, col_lengths)}")
 
 
-@click.command()
+@click.command("add")
 @click.argument("pkgs", nargs=-1)
 @click.option("--pip", default=False, is_flag=True)
 @add_update_options
-def add(pkgs: List[str], pip: bool, update: Optional[bool], install: Optional[bool], prune: Optional[bool], force: bool,
-        show: bool):
+@click.pass_obj
+def dependency_add(conda: Conda, pkgs: List[str], pip: bool, update: Optional[bool], install: Optional[bool],
+                   prune: Optional[bool], force: bool, show: bool):
     """
     Add a package to environment.yml, update the lock file(s) and install the environment
     """
-    conda, pip = change_dependencies(add_pkgs=pkgs, remove_pkgs=[], pip=pip)
+    spec = Specification()
+    lock_conda, lock_pip = change_dependencies(conda, spec, add_pkgs=pkgs, remove_pkgs=[], pip=pip)
     if conda or pip or update:
-        save_env(update, install, prune, force, show, conda=conda, pip=pip)
+        save_env(conda, spec, update, install, prune, force, show, lock_conda=lock_conda, lock_pip=lock_pip)
 
 
-@click.command()
+@click.command("remove")
 @click.argument("pkgs", nargs=-1)
 @click.option("--pip", default=False, is_flag=True)
 @add_update_options
-def remove(pkgs: List[str], pip: bool, update: Optional[bool], install: Optional[bool], prune: Optional[bool],
-           force: bool, show: bool):
+@click.pass_obj
+def dependency_remove(conda: Conda, pkgs: List[str], pip: bool, update: Optional[bool], install: Optional[bool],
+                      prune: Optional[bool], force: bool, show: bool):
     """
     Remove a package from environment.yml, update the lock file(s) and install the environment
     """
-    conda, pip = change_dependencies(add_pkgs=[], remove_pkgs=pkgs, pip=pip)
+    spec = Specification()
+    lock_conda, lock_pip = change_dependencies(conda, spec, add_pkgs=[], remove_pkgs=pkgs, pip=pip)
     if conda or pip or update:
         prune = True if prune is None else prune
-        save_env(update, install, prune, force, show, conda=conda, pip=pip)
+        save_env(conda, spec, update, install, prune, force, show, lock_conda=lock_conda, lock_pip=lock_pip)
 
 
-@click.group(cls=NaturalOrderGroup)
-def platform():
-    pass
-
-
-@platform.command("list")
-def platform_list():
-    platforms = spec_platforms()
+@click.command("list")
+@click.pass_obj
+def platform_list(conda: Conda):
+    spec = Specification()
+    platforms = spec_platforms(spec, conda.env.platform)
     col_lengths = pkg_col_lengths(platforms, ["platform", "comment"])
     for platform in platforms:
         print(f"- {format_pkg_line(platform, col_lengths)}")
 
 
-@platform.command("add")
+@click.command("add")
 @click.argument("platforms", nargs=-1)
 @add_update_options
-def platform_add(platforms: List[str], update: Optional[bool], install: Optional[bool], prune: Optional[bool],
-                 force: bool, show: bool):
+@click.pass_obj
+def platform_add(conda: Conda, platforms: List[str], update: Optional[bool], install: Optional[bool],
+                 prune: Optional[bool], force: bool, show: bool):
     for platform in platforms:
         if platform not in PLATFORMS:
             click.secho(f"Cannot add unknown platform '{click.style(platform, bold=True)}'", fg="red", file=sys.stderr)
             exit(1)
-    changed = spec_list_add(platforms, "platforms", "platform")
+    spec = Specification()
+    changed = spec_list_add(spec, platforms, "platforms", "platform")
     if changed or update:
-        save_env(update, install, prune, force, show)
+        save_env(conda, spec, update, install, prune, force, show)
 
 
-@platform.command("remove")
+@click.command("remove")
 @click.argument("platforms", nargs=-1)
 @add_update_options
-def platform_remove(platforms: List[str], update: Optional[bool], install: Optional[bool], prune: Optional[bool],
-                    force: bool, show: bool):
-    changed = spec_list_remove(platforms, "platforms", "platform")
+@click.pass_obj
+def platform_remove(conda: Conda, platforms: List[str], update: Optional[bool], install: Optional[bool],
+                    prune: Optional[bool], force: bool, show: bool):
+    spec = Specification()
+    changed = spec_list_remove(spec, platforms, "platforms", "platform")
     if changed or update:
-        save_env(update, install, prune, force, show)
+        save_env(conda, spec, update, install, prune, force, show)
 
 
-@click.group(cls=NaturalOrderGroup)
-def channel():
-    pass
-
-
-@channel.command("list")
+@click.command("list")
 def channel_list():
-    channels = spec_channels()
+    spec = Specification()
+    channels = spec_channels(spec)
     col_lengths = pkg_col_lengths(channels, ["channel", "comment"])
     for channel in channels:
         print(f"- {format_pkg_line(channel, col_lengths)}")
 
 
-@channel.command("add")
+@click.command("add")
 @click.argument("channels", nargs=-1)
 @add_update_options
-def channel_add(channels: List[str], update: Optional[bool], install: Optional[bool], prune: Optional[bool],
-                force: bool, show: bool):
-    changed = spec_list_add(channels, "channels", "channel", prepend=True)
+@click.pass_obj
+def channel_add(conda: Conda, channels: List[str], update: Optional[bool], install: Optional[bool],
+                prune: Optional[bool], force: bool, show: bool):
+    spec = Specification()
+    changed = spec_list_add(spec, channels, "channels", "channel", prepend=True)
     if changed or update:
-        save_env(update, install, prune, force, show)
+        save_env(conda, spec, update, install, prune, force, show)
 
 
-@channel.command("remove")
+@click.command("remove")
 @click.argument("channels", nargs=-1)
 @add_update_options
-def channel_remove(channels: List[str], update: Optional[bool], install: Optional[bool], prune: Optional[bool],
-                   force: bool, show: bool):
-    changed = spec_list_remove(channels, "channels", "channel")
+@click.pass_obj
+def channel_remove(conda: Conda, channels: List[str], update: Optional[bool], install: Optional[bool],
+                   prune: Optional[bool], force: bool, show: bool):
+    spec = Specification()
+    changed = spec_list_remove(spec, channels, "channels", "channel")
     if changed or update:
-        save_env(update, install, prune, force, show)
+        save_env(conda, spec, update, install, prune, force, show)
+
+
+def add_commands(cli: click.Group):
+    cli.add_command(dependency_list)
+    cli.add_command(dependency_add)
+    cli.add_command(dependency_remove)
+    cli.add_command(click.Group("platform", [platform_list, platform_add, platform_remove]))
+    cli.add_command(click.Group("channel", [channel_list, channel_add, channel_remove]))

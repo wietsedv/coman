@@ -7,28 +7,166 @@ from distutils.version import LooseVersion
 from hashlib import md5
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import click
 
-from ensureconda.api import (determine_conda_version, determine_mamba_version, determine_micromamba_version)
+import click
+from ensureconda.api import determine_conda_version, determine_mamba_version, determine_micromamba_version
 from ensureconda.installer import extract_files_from_conda_package, install_micromamba, request_url_with_retry
 from ensureconda.resolve import (conda_executables, conda_standalone_executables, mamba_executables,
                                  micromamba_executables, platform_subdir, safe_next)
+from semantic_version.base import Version
 
 MIN_CONDA_VERSION = LooseVersion("4.10")
 MIN_MAMBA_VERSION = LooseVersion("0.15")
 
-_exe: Optional[Path] = None
-_conda_root = None
-_env_name = None
+
+class Environment:
+    def __init__(self, conda: 'Conda'):
+        cwd = os.path.normpath(os.getcwd())
+        hash = md5(cwd.encode("utf-8")).hexdigest()[:8]
+
+        self.platform = platform_subdir()
+        self.conda = conda
+        self.name = f"{os.path.basename(cwd)}-{hash}"
+    
+    @property
+    def prefix(self):
+        return self.conda.envs_dir / self.name
+
+    @property
+    def python(self):
+        return self.prefix / "bin" / "python"
+    
+    @property
+    def python_version(self):
+        if self.python.exists():
+            vstr = subprocess.check_output([self.python, "--version"], encoding="utf-8").split(" ")[-1].strip()
+            return Version(vstr)
+
+    @property
+    def conda_hash(self):
+        env_hash_file = self.prefix / "conda_hash.txt"
+        if env_hash_file.exists():
+            with open(env_hash_file) as f:
+                return f.read().strip()
+
+    @property
+    def pip_hash(self):
+        env_hash_file = self.prefix / "pip_hash.txt"
+        if env_hash_file.exists():
+            with open(env_hash_file) as f:
+                return f.read().strip()
+    
+    def shell_hook(self):
+        exe_flag = " --micromamba" if self.conda.is_micromamba() else ""
+        bin_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        return f"eval $({bin_dir}/coman{exe_flag} shell --hook --quiet)"
+
+    def run(self, args: List[str]):
+        # "conda run" only works with regular conda
+        if self.conda.is_conda(standalone=False):
+            p = subprocess.run([self.conda.exe, "run", "--prefix", self.conda.env.prefix, "--no-capture-out", "--live-stream", *args])
+            exit(p.returncode)
+
+        # workaround for other backends
+        cmd = " ".join(args)
+        exit(subprocess.run([
+            "/usr/bin/env",
+            "bash",
+            "-c",
+            f"{self.shell_hook()} && {cmd} && exit 0",
+        ]).returncode)
+
+class Conda:
+    def __init__(self,
+                 conda: Optional[bool] = None,
+                 conda_standalone: Optional[bool] = None,
+                 mamba: Optional[bool] = None,
+                 micromamba: Optional[bool] = None) -> None:
+        if conda or conda_standalone or mamba or micromamba:
+            self.conda = conda or False
+            self.conda_standalone = conda_standalone or False
+            self.mamba = mamba or False
+            self.micromamba = micromamba or False
+        else:
+            self.conda, self.conda_standalone, self.mamba, self.micromamba = True, True, True, True
+
+        # TODO make lazy
+        self.root = self._get_root()
+        self.exe = self._get_exe()
+
+        os.environ["CONDA_ENVS_PATH"] = os.getenv("CONDA_ENVS_PATH", f"{self.root}/envs")
+        self.envs_dir = Path(os.environ["CONDA_ENVS_PATH"])
+
+        os.environ["CONDA_PKGS_DIRS"] = os.getenv("CONDA_PKGS_DIRS", f"{self.root}/pkgs")
+        self.pkgs_dir = Path(os.environ["CONDA_PKGS_DIRS"])
+
+        self.env = Environment(self)
 
 
-def install_conda_exe() -> Optional[Path]:
+    def run(self, args: List[Any], capture: bool = True, check: bool = True, exe: Optional[Path] = None):
+        exe = exe or self.exe
+        args = [exe, *args]
+        if not capture:
+            return subprocess.run(args, encoding="utf-8")
+
+        p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
+        if check and p.returncode != 0:
+            if p.stdout:
+                print(p.stdout.strip(), file=sys.stderr)
+            print(p.stderr.strip(), file=sys.stderr)
+        return p
+
+    def is_conda(self, standalone: Optional[bool] = None) -> bool:
+        if standalone:
+            return self.exe.name == "conda_standalone"
+        if standalone is None:
+            return self.exe.name in ["conda", "conda_standalone"]
+        return self.exe.name == "conda"
+
+    def is_mamba(self) -> bool:
+        return self.exe.name == "mamba"
+
+    def is_micromamba(self) -> bool:
+        return self.exe.name == "micromamba"
+
+    def _get_exe(self):
+        exe = None
+        if not exe and self.conda:
+            exe = conda_exe()
+        if not exe and self.conda_standalone:
+            exe = conda_standalone_exe()
+        if not exe and self.mamba:
+            exe = mamba_exe()
+        if not exe and self.micromamba:
+            exe = micromamba_exe()
+        if not exe:
+            click.secho("No valid Conda executable was found", fg="red", file=sys.stderr)
+            exit(1)
+        return exe
+    
+    def _get_root(self):
+        root = os.getenv("CONDA_ROOT", os.getenv("MAMBA_ROOT_PREFIX"))
+        if root:
+            _conda_root = Path(root)
+            return _conda_root
+
+        p = self.run(["info", "--json"], check=False)
+        if p.returncode == 0:
+            res = json.loads(p.stdout)
+            _conda_root = Path(res["default_prefix"])
+            return _conda_root
+
+        _conda_root = Path(os.path.expanduser("~/conda"))
+        return _conda_root
+
+
+def install_conda_standalone() -> Optional[Path]:
     url = "https://api.anaconda.org/package/conda-forge/conda-standalone/files"
     resp = request_url_with_retry(url)
 
     candidates = []
     for file_info in resp.json():
-        if file_info["attrs"]["subdir"] == system_platform():
+        if file_info["attrs"]["subdir"] == platform_subdir():
             candidates.append(file_info)
 
     if len(candidates) == 0:
@@ -53,62 +191,30 @@ def install_conda_exe() -> Optional[Path]:
         dest_filename="conda_standalone",
     )
 
-
-def is_conda(exe: Optional[Path] = None, standalone: Optional[bool] = None) -> bool:
-    exe = exe or system_exe()
-    if standalone:
-        return exe.name == "conda_standalone"
-    if standalone is None:
-        return exe.name in ["conda", "conda_standalone"]
-    return exe.name == "conda"
+def conda_exe():
+    for exe in conda_executables():
+        if determine_conda_version(exe) >= MIN_CONDA_VERSION:
+            return Path(exe)
 
 
-def is_mamba(exe: Optional[Path] = None) -> bool:
-    exe = exe or system_exe()
-    return exe.name == "mamba"
+def conda_standalone_exe(install: bool = True):
+    for exe in conda_standalone_executables():
+        if determine_conda_version(exe) >= MIN_CONDA_VERSION:
+            return Path(exe)
 
-
-def is_micromamba(exe: Optional[Path] = None) -> bool:
-    exe = exe or system_exe()
-    return exe is not None and exe.name == "micromamba"
-
-
-def conda_exe(standalone: Optional[bool] = None, install: bool = True):
-    global _exe
-    if _exe and is_conda(_exe, standalone=standalone):
-        return _exe
-
-    if standalone is not True:
-        for exe in conda_executables():
-            if determine_conda_version(exe) >= MIN_CONDA_VERSION:
-                return Path(exe)
-
-    if standalone is not False:
-        for exe in conda_standalone_executables():
-            if determine_conda_version(exe) >= MIN_CONDA_VERSION:
-                return Path(exe)
-
-        if install:
-            exe = install_conda_exe()
-            if exe and determine_conda_version(exe) >= MIN_CONDA_VERSION:
-                return Path(exe)
+    if install:
+        exe = install_conda_standalone()
+        if exe and determine_conda_version(exe) >= MIN_CONDA_VERSION:
+            return Path(exe)
 
 
 def mamba_exe():
-    global _exe
-    if _exe and is_mamba(_exe):
-        return _exe
-
     for exe in mamba_executables():
         if determine_mamba_version(exe) >= MIN_MAMBA_VERSION:
             return Path(exe)
 
 
 def micromamba_exe(install: bool = True):
-    global _exe
-    if _exe and is_micromamba(_exe):
-        return _exe
-
     for exe in micromamba_executables():
         if determine_micromamba_version(exe) >= MIN_MAMBA_VERSION:
             return Path(exe)
@@ -119,133 +225,16 @@ def micromamba_exe(install: bool = True):
             return Path(exe)
 
 
-def system_exe(conda: Optional[bool] = None,
-               conda_standalone: Optional[bool] = None,
-               mamba: Optional[bool] = None,
-               micromamba: Optional[bool] = None) -> Path:
-    global _exe
-    if _exe:
-        assert conda is None and conda_standalone is None and mamba is None and micromamba is None
-        return _exe
-
-    if conda or conda_standalone or mamba or micromamba:
-        conda = conda or False
-        conda_standalone = conda_standalone or False
-        mamba = mamba or False
-        micromamba = micromamba or False
-    else:
-        conda, conda_standalone, mamba, micromamba = True, True, True, True
-
-    if not _exe and conda:
-        _exe = conda_exe(standalone=False)
-    if not _exe and conda_standalone:
-        _exe = conda_exe(standalone=True)
-    if not _exe and mamba:
-        _exe = mamba_exe()
-    if not _exe and micromamba:
-        _exe = micromamba_exe()
-
-    if not _exe:
-        click.secho("No valid Conda executable was found", fg="red", file=sys.stderr)
-        exit(1)
-
-    envs_dir()
-    pkgs_dir()
-    return _exe
-
-
-def run_exe(args: List[Any], capture: bool = True, check: bool = True, exe: Optional[Path] = None):
-    exe = exe or system_exe()
-
-    args = [exe, *args]
-    if not capture:
-        return subprocess.run(args, encoding="utf-8")
-
-    p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
-    if check and p.returncode != 0:
-        if p.stdout:
-            print(p.stdout.strip(), file=sys.stderr)
-        print(p.stderr.strip(), file=sys.stderr)
-    return p
-
-
-def conda_root():
-    global _conda_root
-    if _conda_root:
-        return _conda_root
-
-    root = os.getenv("CONDA_ROOT", os.getenv("MAMBA_ROOT_PREFIX"))
-    if root:
-        _conda_root = Path(root)
-        return _conda_root
-
-    p = run_exe(["info", "--json"], check=False)
-    if p.returncode == 0:
-        res = json.loads(p.stdout)
-        _conda_root = Path(res["default_prefix"])
-        return _conda_root
-
-    _conda_root = Path(os.path.expanduser("~/conda"))
-    return _conda_root
-
-
-def envs_dir():
-    p = os.getenv("CONDA_ENVS_PATH")
-    if not p:
-        p = os.environ["CONDA_ENVS_PATH"] = f"{conda_root()}/envs"
-    return Path(p)
-
-
-def pkgs_dir():
-    p = os.getenv("CONDA_PKGS_DIRS")
-    if not p:
-        p = os.environ["CONDA_PKGS_DIRS"] = f"{conda_root()}/pkgs"
-    return Path(p)
-
-
-def env_name():
-    global _env_name
-    if _env_name:
-        return _env_name
-    current_dir = os.path.normpath(os.getcwd())
-    current_basename = os.path.basename(current_dir)
-    hash = md5(current_dir.encode("utf-8")).hexdigest()[:8]
-    _env_name = f"{current_basename}-{hash}"
-    return _env_name
-
-
-def env_prefix():
-    return envs_dir() / env_name()
-
-
-def env_prefix_conda_hash() -> Optional[str]:
-    env_hash_file = env_prefix() / "conda_hash.txt"
-    if env_hash_file.exists():
-        with open(env_hash_file) as f:
-            return f.read().strip()
-
-
-def env_prefix_pip_hash() -> Optional[str]:
-    env_hash_file = env_prefix() / "pip_hash.txt"
-    if env_hash_file.exists():
-        with open(env_hash_file) as f:
-            return f.read().strip()
-
-
-def system_platform():
-    return platform_subdir()
-
-
-def conda_search(pkg: str, channels: List[str], platform: Optional[str] = None) -> List[Dict[str, Any]]:
+def conda_search(conda: Conda, pkg: str, channels: List[str], platform: Optional[str] = None) -> List[Dict[str, Any]]:
     args = []
     for c in channels:
         args.extend(["-c", c])
     if platform:
         args.extend(["--subdir", platform])
 
-    p = run_exe(["search", pkg, *args, "--json"], check=False, exe=conda_exe())
+    p = conda.run(["search", pkg, *args, "--json"], check=False, exe=conda_exe())
     if not p.stdout:
-        print(f"Unable to query package through '{system_exe()}'", file=sys.stderr)
+        print(f"Unable to query package through '{conda.exe}'", file=sys.stderr)
         exit(1)
     res = json.loads(p.stdout)
     if "error" in res:
@@ -264,8 +253,8 @@ def conda_search(pkg: str, channels: List[str], platform: Optional[str] = None) 
     return info
 
 
-def conda_pkg_info(pkg: str, channels: List[str]):
-    return conda_search(pkg, channels)[-1]
+def conda_pkg_info(conda: Conda, pkg: str, channels: List[str]):
+    return conda_search(conda, pkg, channels)[-1]
 
 
 def pypi_pkg_info(pkg: str):
@@ -293,7 +282,7 @@ def conda_info():
         condastandalone_ver = determine_conda_version(condastandalone_exe) if condastandalone_exe else None
         condastandalone_state = "ok"
         if not condastandalone_ver or condastandalone_ver < MIN_CONDA_VERSION:
-            condastandalone_exe = install_conda_exe()
+            condastandalone_exe = install_conda_standalone()
             condastandalone_ver = determine_conda_version(condastandalone_exe) if condastandalone_exe else None
             condastandalone_state = "unsupported" if condastandalone_ver and condastandalone_ver < MIN_CONDA_VERSION else "ok"
         condastandalone_ver = f"{condastandalone_ver} ({condastandalone_state}) [{condastandalone_exe}]" if condastandalone_ver else "n/a"

@@ -1,14 +1,14 @@
 import hashlib
 import json
-from json.decoder import JSONDecodeError
 import os
 import re
+import shlex
 import subprocess
 import sys
 from glob import glob
+from json.decoder import JSONDecodeError
 from pathlib import Path
 from typing import Iterator, List, Optional
-import shlex
 
 import click
 import ruamel.yaml as yaml
@@ -17,21 +17,10 @@ from conda_lock.src_parser import LockSpecification
 from semantic_version import SimpleSpec, Version
 
 from coman._version import __version__
-from coman.spec import (conda_lock_file, conda_lock_hash, conda_outdated, pip_lock_comments, pip_lock_file,
-                        pip_lock_hash, pip_outdated, require_spec_file, spec_channel_names, spec_file,
-                        spec_package_names, spec_pip_requirements, spec_platform_names)
-from coman.system import (conda_info, conda_pkg_info, conda_root, conda_search, env_prefix, envs_dir, is_micromamba,
-                          pkgs_dir, run_exe, system_exe, system_platform)
+from coman.spec import (Specification, conda_lock_file, conda_lock_hash, pip_lock_comments, pip_lock_file, pip_lock_hash,
+                        spec_channel_names, spec_dependency_names, spec_pip_requirements, spec_platform_names)
+from coman.system import Conda, conda_exe, conda_info, conda_pkg_info, conda_search, micromamba_exe
 from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
-
-
-def env_python_exe():
-    return env_prefix() / "bin" / "python"
-
-
-def env_python_version():
-    vstring = subprocess.check_output([env_python_exe(), "--version"], encoding="utf-8").split(" ")[-1].strip()
-    return Version(vstring)
 
 
 def filter_platform_selectors(content: str, platform) -> Iterator[str]:
@@ -70,7 +59,8 @@ def parse_environment_file(spec_file: Path, platform: str) -> LockSpecification:
 
 
 def parse_unsatisfiable_error(msg: str):
-    spec_re = re.compile(r"(- )?(?:([a-zA-Z0-9_-]+)(?:\[version='([^']+)'\]|(==?[^ ]+)) -> )?(\w+)(?:\[version='([^']+)'\]|(==?[^ ]+))?")
+    spec_re = re.compile(
+        r"(- )?(?:([a-zA-Z0-9_-]+)(?:\[version='([^']+)'\]|(==?[^ ]+)) -> )?(\w+)(?:\[version='([^']+)'\]|(==?[^ ]+))?")
 
     conflicts = {}
     incompatible = set()
@@ -119,13 +109,12 @@ def parse_unsatisfiable_error(msg: str):
     return conflicts
 
 
-def solve_specs_for_arch(channels: List[str], specs: List[str], platform: str) -> dict:
-    exe = system_exe()
+def solve_specs_for_arch(conda: Conda, channels: List[str], specs: List[str], platform: str) -> dict:
     args = [
-        str(exe),
+        str(conda.exe),
         "create",
         "--prefix",
-        os.path.join(pkgs_dir(), "prefix"),
+        os.path.join(conda.pkgs_dir, "prefix"),
         "--dry-run",
         "--json",
     ]
@@ -192,14 +181,18 @@ def solve_specs_for_arch(channels: List[str], specs: List[str], platform: str) -
                             file=sys.stderr,
                         )
                     print(file=sys.stderr)
-                
+
                 incompatible = sorted(incompatible)
                 if len(incompatible) == 1:
                     pkg_name = incompatible[0]
-                    print(f"The root cause may be that {click.style(pkg_name, fg='red')} is unavailable on this platform", file=sys.stderr)
+                    print(
+                        f"The root cause may be that {click.style(pkg_name, fg='red')} is unavailable on this platform",
+                        file=sys.stderr)
                 elif len(incompatible) > 1:
                     pkg_names = ", ".join([click.style(pkg_name, fg='red') for pkg_name in incompatible])
-                    print(f"The root cause may be that these packages are unavailble on this platform:", pkg_names, file=sys.stderr)
+                    print(f"The root cause may be that these packages are unavailble on this platform:",
+                          pkg_names,
+                          file=sys.stderr)
                 sys.exit(1)
 
         if "message" in res:
@@ -212,12 +205,9 @@ def solve_specs_for_arch(channels: List[str], specs: List[str], platform: str) -
     return res
 
 
-def create_lockfile_from_spec(
-    *,
-    spec: LockSpecification,
-) -> List[str]:
-    exe = system_exe()
+def create_lockfile_from_spec(conda: Conda, spec: LockSpecification) -> List[str]:
     dry_run_install = solve_specs_for_arch(
+        conda,
         platform=spec.platform,
         channels=spec.channels,
         specs=spec.specs,
@@ -232,7 +222,7 @@ def create_lockfile_from_spec(
 
     link_actions = dry_run_install["actions"]["LINK"]
     for link in link_actions:
-        if is_micromamba(exe):
+        if conda.is_micromamba():
             link["url_base"] = fn_to_dist_name(link["url"])
             link["dist_name"] = fn_to_dist_name(link["fn"])
         else:
@@ -249,7 +239,7 @@ def create_lockfile_from_spec(
     non_fetch_packages = link_dists - set(fetch_by_dist_name)
     if len(non_fetch_packages) > 0:
         for search_res in search_for_md5s(
-                conda=exe,
+                conda=conda.exe,
                 package_specs=[x for x in link_actions if x["dist_name"] in non_fetch_packages],
                 platform=spec.platform,
                 channels=spec.channels,
@@ -258,7 +248,7 @@ def create_lockfile_from_spec(
             fetch_by_dist_name[dist_name] = search_res
 
     for pkg in link_actions:
-        dist_name = (fn_to_dist_name(pkg["fn"]) if is_micromamba(exe) else pkg["dist_name"])
+        dist_name = (fn_to_dist_name(pkg["fn"]) if conda.is_micromamba() else pkg["dist_name"])
         url = fetch_by_dist_name[dist_name]["url"]
         md5 = fetch_by_dist_name[dist_name]["md5"]
         lockfile_contents.append(f"{url}#{md5}")
@@ -275,41 +265,56 @@ def create_lockfile_from_spec(
     return lockfile_contents
 
 
-def env_info():
+def conda_outdated(conda: Conda, conda_hash: Optional[str] = None) -> bool:
+    conda_hash = conda_hash or conda_lock_hash(conda.env.platform)
+    return conda.env.conda_hash != conda_hash
+
+
+def pip_outdated(conda: Conda, pip_hash: Optional[str] = None) -> bool:
+    pip_hash = pip_hash or pip_lock_hash()
+    return conda.env.pip_hash != pip_hash
+
+
+def env_info(conda: Conda, spec: Specification):
     print("Current environment")
     sys_status = "up-to-date"
-    if not spec_file().exists():
+    if not spec.spec_file.exists():
         sys_status = "no environment.yml (run `coman init`)"
-    elif not conda_lock_file().exists():
+    elif not conda_lock_file(conda.env.platform).exists():
         sys_status = f"no lock file for this platform (run `coman lock`)"
-    elif not env_prefix().exists():
+    elif not conda.env.prefix.exists():
         sys_status = "not installed (run `coman install`)"
-    elif conda_outdated():
+    elif conda_outdated(conda):
         sys_status = "env outdated (run `coman install`)"
-    elif pip_outdated():
+    elif pip_outdated(conda):
         sys_status = "pip outdated (run `coman install`)"
 
-    print(f"> Prefix:   {env_prefix()}")
-    print(f"> Platform: {system_platform()}")
+    print(f"> Prefix:   {conda.env.prefix}")
+    print(f"> Platform: {conda.env.platform}")
     print(f"> Status:   {sys_status}")
-    if env_prefix().exists():
-        print(f"> Python:   {env_python_version()}")
+    if conda.env.prefix.exists():
+        print(f"> Python:   {conda.env.python_version}")
 
     print("\nCoMan")
     print(f"> Version:  {__version__}")
     py = sys.version_info
     print(f"> Python:   {py.major}.{py.minor}.{py.micro}")
 
-    print(f"> Root:     {conda_root()}")
-    print(f"> Envs dir: {envs_dir()}")
-    print(f"> Pkgs dir: {pkgs_dir()}")
+    print(f"> Root:     {conda.root}")
+    print(f"> Envs dir: {conda.envs_dir}")
+    print(f"> Pkgs dir: {conda.pkgs_dir}")
 
     print("\nConda")
     conda_info()
 
 
-def _env_lock_conda():
-    platforms = spec_platform_names()
+def _env_lock_conda(conda: Conda, spec: Specification):
+    platforms = spec_platform_names(spec, conda.env.platform)
+    if conda.env.platform not in platforms:
+        click.secho(f"WARNING: Platform {conda.env.platform} is not whitelisted in {spec.spec_file}\n",
+                    fg="yellow",
+                    file=sys.stderr)
+
     new_lock_paths = [str(conda_lock_file(p)) for p in platforms]
     for lock_path in glob(str(conda_lock_file("*"))):
         if lock_path not in new_lock_paths:
@@ -332,8 +337,8 @@ def _env_lock_conda():
             click.style(platform, fg="magenta"),
             file=sys.stderr,
         )
-        lock_spec = parse_environment_file(spec_file(), platform)
-        lock_contents = create_lockfile_from_spec(spec=lock_spec)
+        lock_spec = parse_environment_file(spec.spec_file, platform)
+        lock_contents = create_lockfile_from_spec(conda, lock_spec)
         with open(conda_lock_file(platform), "w") as f:
             f.write("\n".join(lock_contents) + "\n")
 
@@ -364,8 +369,8 @@ def _run_pip_compile(requirements):
     return res.stdout
 
 
-def _env_lock_pip():
-    requirements = spec_pip_requirements()
+def _env_lock_pip(spec: Specification):
+    requirements = spec_pip_requirements(spec)
     if not requirements:
         lock_path = pip_lock_file()
         if lock_path.exists():
@@ -395,18 +400,15 @@ def _env_lock_pip():
         f.write(lock)
 
 
-def env_lock(conda: bool = True, pip: bool = True):
-    require_spec_file()
-
-    if conda:
-        _env_lock_conda()
-    if pip:
-        _env_lock_pip()
+def env_lock(conda: Conda, spec: Specification, lock_conda: bool = True, lock_pip: bool = True):
+    if lock_conda:
+        _env_lock_conda(conda, spec)
+    if lock_pip:
+        _env_lock_pip(spec)
 
 
-def _env_install_conda(prune: bool):
-    prefix = env_prefix()
-    lock_path = conda_lock_file()
+def _env_install_conda(conda: Conda, prune: bool):
+    lock_path = conda_lock_file(conda.env.platform)
     print(
         click.style("install:", fg="bright_white"),
         "Installing",
@@ -417,20 +419,20 @@ def _env_install_conda(prune: bool):
     )
 
     args = [
-        "create" if prune or not prefix.exists() else "install",
+        "create" if prune or not conda.env.prefix.exists() else "install",
         "--file",
         lock_path,
         "--prefix",
-        prefix,
+        conda.env.prefix,
         "--yes",
     ]
-    p = run_exe(args, capture=False)
+    p = conda.run(args, capture=False)
     if p.returncode != 0:
-        click.secho(f"\nCould not install {lock_path} into {prefix}", fg="red", file=sys.stderr)
+        click.secho(f"\nCould not install {lock_path} into {conda.env.prefix}", fg="red", file=sys.stderr)
         exit(1)
 
 
-def _env_install_pip():
+def _env_install_pip(python: Path):
     lock_path = pip_lock_file()
     print(
         click.style("install:", fg="bright_white"),
@@ -440,7 +442,7 @@ def _env_install_pip():
         file=sys.stderr,
     )
     args = [
-        env_python_exe(),
+        python,
         "-m",
         "pip",
         "install",
@@ -456,26 +458,30 @@ def _env_install_pip():
         exit(1)
 
 
-def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool = False, show: bool = False):
-    require_spec_file()
-
-    sys_platform = system_platform()
-    if sys_platform not in spec_platform_names(quiet=True):
-        click.secho(f"Cannot install because {sys_platform} is not whitelisted in {spec_file()}", fg="red", file=sys.stderr)
-        click.secho(f"You can add it with: `coman platform add {sys_platform}`", fg="red", file=sys.stderr)
+def env_install(conda: Conda,
+                spec: Specification,
+                prune: Optional[bool] = None,
+                force: bool = False,
+                quiet: bool = False,
+                show: bool = False):
+    if conda.env.platform not in spec_platform_names(spec, conda.env.platform):
+        click.secho(f"Cannot install because {conda.env.platform} is not whitelisted in {spec.spec_file}",
+                    fg="red",
+                    file=sys.stderr)
+        click.secho(f"You can add it with: `coman platform add {conda.env.platform}`", fg="red", file=sys.stderr)
         exit(1)
 
-    old_pkgs = env_show(deps=True, only_return=True) if show and env_prefix().exists() else []
+    old_pkgs = env_show(conda, spec, deps=True, only_return=True) if show and conda.env.prefix.exists() else []
 
-    use_pip = bool(spec_pip_requirements())
-    if not conda_lock_file().exists() or (use_pip and not pip_lock_file().exists()):
-        env_lock()
+    use_pip = bool(spec_pip_requirements(spec))
+    if not conda_lock_file(conda.env.platform).exists() or (use_pip and not pip_lock_file().exists()):
+        env_lock(conda, spec)
 
-    conda_hash = conda_lock_hash()
-    conda_changed = conda_outdated(conda_hash)
+    conda_hash = conda_lock_hash(conda.env.platform)
+    conda_changed = conda_outdated(conda, conda_hash)
 
     pip_hash = pip_lock_hash()
-    pip_changed = pip_outdated(pip_hash)
+    pip_changed = pip_outdated(conda, pip_hash)
 
     if prune is None:
         prune = (use_pip and conda_changed) or pip_changed
@@ -484,8 +490,8 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
 
     # Conda
     if force or prune or conda_changed:
-        _env_install_conda(prune)
-        with open(env_prefix() / "conda_hash.txt", "w") as f:
+        _env_install_conda(conda, prune)
+        with open(conda.env.prefix / "conda_hash.txt", "w") as f:
             f.write(conda_hash)
             installed = True
     elif not quiet:
@@ -497,10 +503,10 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
         )
 
     # Pip
-    pip_hash_path = env_prefix() / "pip_hash.txt"
+    pip_hash_path = conda.env.prefix / "pip_hash.txt"
     if pip_hash:
         if force or prune or pip_changed:
-            _env_install_pip()
+            _env_install_pip(conda.env.python)
             with open(pip_hash_path, "w") as f:
                 f.write(pip_hash)
             installed = True
@@ -519,7 +525,7 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
 
     print(file=sys.stderr)
     if show:
-        new_pkgs = env_show(deps=True, only_return=True)
+        new_pkgs = env_show(conda, spec, deps=True, only_return=True)
         if new_pkgs != old_pkgs:
             new_pkg_names = [pkg_info["name"] for pkg_info in new_pkgs]
             old_pkg_names = [pkg_info["name"] for pkg_info in old_pkgs]
@@ -565,17 +571,22 @@ def env_install(prune: Optional[bool] = None, force: bool = False, quiet: bool =
             print(file=sys.stderr)
 
 
-def env_uninstall():
-    run_exe(["env", "remove", "--prefix", env_prefix()])
+def env_uninstall(conda: Conda):
+    conda.run(["env", "remove", "--prefix", conda.env.prefix])
 
 
-def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = None, only_return: bool = False):
-    p = run_exe(["list", "--prefix", env_prefix(), *query, "--json"])
+def env_show(conda: Conda,
+            spec: Specification,
+             query: List[str] = [],
+             deps: bool = False,
+             pip: Optional[bool] = None,
+             only_return: bool = False):
+    p = conda.run(["list", "--prefix", conda.env.prefix, *query, "--json"])
     if not p.stdout:
         print("No results", file=sys.stderr)
         exit(1)
 
-    conda_names, pip_names = spec_package_names()
+    conda_names, pip_names = spec_dependency_names(spec)
 
     pkg_infos = json.loads(p.stdout)
     if pip is False:
@@ -610,13 +621,12 @@ def env_show(query: List[str] = [], deps: bool = False, pip: Optional[bool] = No
     return pkg_infos
 
 
-def env_search(pkg: str, platform: Optional[str], limit: int, deps: bool):
-    platforms = [platform] if platform else spec_platform_names()
-    channels = spec_channel_names()
+def env_search(conda: Conda, spec: Specification, pkg: str, platform: Optional[str], limit: int, deps: bool):
+    platforms = [platform] if platform else spec_platform_names(spec, conda.env.platform)
+    channels = spec_channel_names(spec)
 
-    python_ver = None
-    if env_prefix().exists():
-        python_ver = env_python_version()
+    python_ver = conda.env.python_version
+    if python_ver:
         print("Python:  ", python_ver)
 
     print("Channels:", ", ".join([click.style(c, fg=COLORS["channel"]) for c in channels]) + "\n", file=sys.stderr)
@@ -624,7 +634,7 @@ def env_search(pkg: str, platform: Optional[str], limit: int, deps: bool):
     for i, platform in enumerate(platforms, start=1):
         if i > 1:
             print(file=sys.stderr)
-        pkg_infos = conda_search(pkg, channels=channels, platform=platform)
+        pkg_infos = conda_search(conda, pkg, channels=channels, platform=platform)
         click.secho(f"# platform: {click.style(platform, bold=True)}", fg="magenta")
         if not pkg_infos:
             click.secho("No results", fg="yellow")
@@ -662,9 +672,9 @@ def env_search(pkg: str, platform: Optional[str], limit: int, deps: bool):
             print(format_pkg_line(pkg_info, col_lengths, bold=j == len(pkg_infos)))
 
 
-def env_init(force: bool):
-    if not force and spec_file().exists():
-        print(f"Specification file `{spec_file()}` already exists", file=sys.stderr)
+def env_init(conda: Conda, spec: Specification, force: bool):
+    if not force and spec.spec_file.exists():
+        print(f"Specification file `{spec.spec_file}` already exists", file=sys.stderr)
         exit(1)
 
     print(
@@ -673,13 +683,30 @@ def env_init(force: bool):
         click.style("environment.yml", fg="green"),
         file=sys.stderr,
     )
-    pkg_info = conda_pkg_info("python", channels=["conda-forge"])
+    pkg_info = conda_pkg_info(conda, "python", channels=["conda-forge"])
 
     v = Version(pkg_info['version'])
     pkg_str = f"{pkg_info['name']} >={v},<={v.next_minor()}"
 
-    with open(spec_file(), "w") as f:
-        f.write(f"platforms:\n- {system_platform()}\nchannels:\n- conda-forge\ndependencies:\n- {pkg_str}\n")
+    with open(spec.spec_file, "w") as f:
+        f.write(f"platforms:\n- {conda.env.platform}\nchannels:\n- conda-forge\ndependencies:\n- {pkg_str}\n")
+    spec.data = None
 
     print(file=sys.stderr)
-    env_lock()
+    env_lock(conda, spec)
+
+
+def env_shell_hook(conda: Conda, quiet: bool, shell_name: str):
+    # Currently only works with conda or micromamba
+    if not conda.is_micromamba():
+        exe = conda.exe if conda.is_conda(standalone=False) else conda_exe()
+        if exe:
+            if not quiet:
+                print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
+            print(f"eval \"$('{exe}' shell.{shell_name} hook)\" && conda activate \"{conda.env.prefix}\"")
+            exit(0)
+
+    if not quiet:
+        print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
+    exe = conda.exe if conda.is_micromamba() else micromamba_exe()
+    print(f"eval \"$('{exe}' shell hook -s {shell_name})\" && micromamba activate \"{conda.env.prefix}\"")
