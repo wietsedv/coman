@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Iterator, List, Optional
 
 import click
-import ruamel.yaml as yaml
 from conda_lock.conda_lock import conda_env_override, fn_to_dist_name, search_for_md5s
 from conda_lock.src_parser import LockSpecification
 from semantic_version import SimpleSpec, Version
@@ -48,9 +47,10 @@ def filter_platform_selectors(content: str, platform) -> Iterator[str]:
 
 
 def parse_environment_file(spec_file: Path, platform: str) -> LockSpecification:
+    import ruamel.yaml
     with spec_file.open("r") as f:
         filtered_content = "\n".join(filter_platform_selectors(f.read(), platform=platform))
-        env_yaml_data = yaml.safe_load(filtered_content)
+        env_yaml_data = ruamel.yaml.safe_load(filtered_content)
 
     specs = [x for x in env_yaml_data["dependencies"] if isinstance(x, str)]
     channels = env_yaml_data.get("channels", [])
@@ -673,17 +673,17 @@ def env_init(conda: Conda, spec: Specification, force: bool):
     env_lock(conda, spec)
 
 
-def env_shell_hook(conda: Conda, quiet: bool, shell_name: str):
+def env_shell_hook(conda: Conda, quiet: bool, shell_type: str):
     # Currently only works with conda or micromamba
     if not conda.is_micromamba():
         exe = conda.exe if conda.is_conda(standalone=False) else conda_exe()
         if exe:
             if not quiet:
                 print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
-            print(f"eval \"$('{exe}' shell.{shell_name} hook)\" && conda activate \"{conda.env.prefix}\"")
+            print(f"eval \"$('{exe}' shell.{shell_type} hook)\" && conda activate \"{conda.env.prefix}\"")
             exit(0)
 
     if not quiet:
         print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
     exe = conda.exe if conda.is_micromamba() else micromamba_exe()
-    print(f"eval \"$('{exe}' shell hook -s {shell_name})\" && micromamba activate \"{conda.env.prefix}\"")
+    print(f"eval \"$('{exe}' shell hook -s {shell_type})\" && micromamba activate \"{conda.env.prefix}\"")

@@ -56,10 +56,10 @@ class Environment:
             with open(env_hash_file) as f:
                 return f.read().strip()
     
-    def shell_hook(self):
+    def shell_hook(self, shell_type: str):
         exe_flag = " --micromamba" if self.conda.is_micromamba() else ""
         bin_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        return f"eval $({bin_dir}/coman{exe_flag} shell --hook --quiet)"
+        return f"eval $({bin_dir}/coman{exe_flag} shell --shell {shell_type} --hook --quiet)"
 
     def run(self, args: List[str]):
         # "conda run" only works with regular conda
@@ -73,7 +73,7 @@ class Environment:
             "/usr/bin/env",
             "bash",
             "-c",
-            f"{self.shell_hook()} && {cmd} && exit 0",
+            f"{self.shell_hook('bash')} && {cmd} && exit 0",
         ]).returncode)
 
 class Conda:

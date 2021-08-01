@@ -18,10 +18,10 @@ from coman.spec import Specification
 @click.option('--micromamba/--no-micromamba', default=None)
 @click.option("--platform", default=False, is_flag=True)
 @click.option("--root", default=False, is_flag=True)
-@click.option("--conda-path", default=False, is_flag=True)
+@click.option("--conda-bin", default=False, is_flag=True)
 @click.option("--name", default=False, is_flag=True)
 @click.option("--prefix", default=False, is_flag=True)
-@click.option("--python", default=False, is_flag=True)
+@click.option("--python-bin", default=False, is_flag=True)
 @click.version_option()
 @click.pass_context
 def cli(
@@ -32,17 +32,17 @@ def cli(
     micromamba: Optional[bool],
     platform: bool,
     root: bool,
-    conda_path: bool,
+    conda_bin: bool,
     name: bool,
     prefix: bool,
-    python: bool,
+    python_bin: bool,
 ):
     conda_ = ctx.obj = Conda(conda, conda_standalone, mamba, micromamba)
     spec = Specification()
 
     if root:
         return print(conda_.root)
-    if conda_path:
+    if conda_bin:
         return print(conda_.exe)
     if platform:
         return print(conda_.env.platform)
@@ -50,7 +50,7 @@ def cli(
         return print(conda_.env.name)
     if prefix:
         return print(conda_.env.prefix)
-    if python:
+    if python_bin:
         return print(conda_.env.python)
 
     if ctx.invoked_subcommand is None:
@@ -203,11 +203,12 @@ def python(conda: Conda, install: bool, args: List[str]):
 
 
 @cli.command()
+@click.option("--shell", default=None)
 @click.option("--hook", default=False, is_flag=True)
 @click.option("--install/--no-install", default=True)
 @click.option("--quiet", default=False, is_flag=True)
 @click.pass_obj
-def shell(conda: Conda, hook: bool, install: bool, quiet: bool):
+def shell(conda: Conda, shell: Optional[str], hook: bool, install: bool, quiet: bool):
     """
     Activate the environment with `eval $(coman shell)`
 
@@ -217,14 +218,13 @@ def shell(conda: Conda, hook: bool, install: bool, quiet: bool):
     if install:
         env_install(conda, spec, quiet=True)
 
-    from shellingham import detect_shell
-    shell_name, shell_path = detect_shell()
-
     if hook:
-        env_shell_hook(conda, quiet, shell_name)
+        env_shell_hook(conda, quiet, shell_type=shell or "posix")
         exit(0)
 
-    exit(subprocess.run([shell_path, "-c", f"{conda.env.shell_hook()}; {shell_path} -i"]).returncode)
+    from shellingham import detect_shell
+    shell_type, shell_path = detect_shell()
+    exit(subprocess.run([shell_path, "-c", f"{conda.env.shell_hook(shell_type)}; {shell_path} -i"]).returncode)
 
 add_spec_commands(cli)
 

@@ -3,8 +3,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import ruamel.yaml
-
 ENV_HASH_PATTERN = re.compile(r"^# env_hash: (.*)$")
 PLATFORM_PATTERN = re.compile(r"^# platform: (.*)$")
 
@@ -23,6 +21,8 @@ class Specification:
     def __init__(self) -> None:
         self.spec_file = Path("environment.yml")
         self.data = None
+
+        import ruamel.yaml
         self._yaml = ruamel.yaml.YAML()
 
     def read(self) -> Dict[str, Any]:
