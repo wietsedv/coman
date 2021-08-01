@@ -8,11 +8,9 @@ import sys
 from glob import glob
 from json.decoder import JSONDecodeError
 from pathlib import Path
-from typing import Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import click
-from conda_lock.conda_lock import conda_env_override, fn_to_dist_name, search_for_md5s
-from conda_lock.src_parser import LockSpecification
 from semantic_version import SimpleSpec, Version
 
 from coman._version import __version__
@@ -20,6 +18,79 @@ from coman.spec import (Specification, conda_lock_file, conda_lock_hash, pip_loc
                         pip_lock_hash, spec_pip_requirements)
 from coman.system import Conda, conda_exe, conda_info, conda_pkg_info, conda_search, micromamba_exe
 from coman.utils import COLORS, format_pkg_line, pkg_col_lengths
+
+
+class LockSpecification:
+    def __init__(self, specs: List[str], channels: List[str], platform: str):
+        self.specs = specs
+        self.channels = channels
+        self.platform = platform
+
+    def env_hash(self) -> str:
+        env_spec = json.dumps(
+            {
+                "channels": self.channels,
+                "platform": self.platform,
+                "specs": sorted(self.specs),
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(env_spec.encode("utf-8")).hexdigest()
+
+
+def conda_env_override(conda: Conda, platform) -> Dict[str, str]:
+    env = dict(os.environ)
+    env.update({
+        "CONDA_SUBDIR": platform,
+        "CONDA_PKGS_DIRS": str(conda.pkgs_dir),
+        "CONDA_UNSATISFIABLE_HINTS_CHECK_DEPTH": "0",
+        "CONDA_ADD_PIP_AS_PYTHON_DEPENDENCY": "False",
+    })
+    return env
+
+
+def search_for_md5s(conda: Conda, package_specs: List[dict], platform: str, channels: List[str]):
+    """Use conda-search to determine the md5 metadata that we need.
+
+    This is only needed if pkgs_dirs is set in condarc.
+    Sadly this is going to be slow since we need to fetch each result individually
+    due to the cli of conda search
+
+    """
+    def matchspec(spec):
+        return (f"{spec['name']}["
+                f"version={spec['version']},"
+                f"subdir={spec['platform']},"
+                f"channel={spec['channel']},"
+                f"build={spec['build_string']}"
+                "]")
+
+    found: Set[str] = set()
+    packages: List[Tuple[str, str]] = [
+        *[(d["name"], matchspec(d)) for d in package_specs],
+        *[(d["name"], f"{d['name']}[url='{d['url_conda']}']") for d in package_specs],
+        *[(d["name"], f"{d['name']}[url='{d['url']}']") for d in package_specs],
+    ]
+
+    for name, spec in packages:
+        if name in found:
+            continue
+        channel_args = []
+        for c in channels:
+            channel_args += ["-c", c]
+        cmd = [str(conda.exe), "search", *channel_args, "--json", spec]
+        out = subprocess.run(
+            cmd,
+            encoding="utf8",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=conda_env_override(conda, platform),
+        )
+        content = json.loads(out.stdout)
+        if name in content:
+            assert len(content[name]) == 1
+            yield content[name][0]
+            found.add(name)
 
 
 def filter_platform_selectors(content: str, platform) -> Iterator[str]:
@@ -46,7 +117,7 @@ def filter_platform_selectors(content: str, platform) -> Iterator[str]:
             yield line
 
 
-def parse_environment_file(spec_file: Path, platform: str) -> LockSpecification:
+def parse_environment_file(spec_file: Path, platform: str):
     import ruamel.yaml
     with spec_file.open("r") as f:
         filtered_content = "\n".join(filter_platform_selectors(f.read(), platform=platform))
@@ -106,7 +177,7 @@ def solve_specs_for_arch(conda: Conda, channels: List[str], specs: List[str], pl
 
     p = subprocess.run(
         args,
-        env=conda_env_override(platform),
+        env=conda_env_override(conda, platform),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         encoding="utf8",
@@ -182,6 +253,16 @@ def solve_specs_for_arch(conda: Conda, channels: List[str], specs: List[str], pl
     return res
 
 
+def fn_to_dist_name(fn: str) -> str:
+    if fn.endswith(".conda"):
+        fn, _, _ = fn.partition(".conda")
+    elif fn.endswith(".tar.bz2"):
+        fn, _, _ = fn.partition(".tar.bz2")
+    else:
+        raise RuntimeError(f"unexpected file type {fn}", fn)
+    return fn
+
+
 def create_lockfile_from_spec(conda: Conda, spec: LockSpecification) -> List[str]:
     dry_run_install = solve_specs_for_arch(
         conda,
@@ -216,7 +297,7 @@ def create_lockfile_from_spec(conda: Conda, spec: LockSpecification) -> List[str
     non_fetch_packages = link_dists - set(fetch_by_dist_name)
     if len(non_fetch_packages) > 0:
         for search_res in search_for_md5s(
-                conda=conda.exe,
+                conda=conda,
                 package_specs=[x for x in link_actions if x["dist_name"] in non_fetch_packages],
                 platform=spec.platform,
                 channels=spec.channels,
@@ -553,7 +634,7 @@ def env_uninstall(conda: Conda):
 
 
 def env_show(conda: Conda,
-            spec: Specification,
+             spec: Specification,
              query: List[str] = [],
              deps: bool = False,
              pip: Optional[bool] = None,
