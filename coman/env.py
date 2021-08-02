@@ -89,7 +89,7 @@ def env_info(conda: Conda, spec: Specification):
     print("\nCoMan")
     print(f"> Version:  {__version__}")
     py = sys.version_info
-    print(f"> Python:   {py.major}.{py.minor}.{py.micro}")
+    print(f"> Python:   {py.major}.{py.minor}.{py.micro} [{sys.executable}]")
 
     print(f"> Root:     {conda.root}")
     print(f"> Envs dir: {conda.envs_dir}")

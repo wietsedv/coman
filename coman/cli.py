@@ -10,8 +10,25 @@ from coman.env import env_info, env_init, env_install, env_lock, env_search, env
 from coman.system import Conda
 from coman.spec import Specification
 
+class AliasedGroup(click.Group):
+    def get_command(self, ctx, cmd_name):
+        aliases = {
+            "ad": "add",
+            "c": "channel",
+            "i": "install",
+            "l": "lock",
+            "ls": "list",
+            "p": "platform",
+            "q": "query",
+            "rm": "remove",
+            "s": "shell",
+            "u": "update",
+        }
+        cmd_name = aliases.get(cmd_name, cmd_name)
+        return click.Group.get_command(self, ctx, cmd_name)
 
-@click.group(invoke_without_command=True)
+
+@click.group(cls=AliasedGroup, invoke_without_command=True)
 @click.option('--conda/--no-conda', default=None)
 @click.option('--conda-standalone/--no-conda-standalone', default=None)
 @click.option('--mamba/--no-mamba', default=None)
@@ -68,14 +85,14 @@ def init(conda: Conda, force: bool):
     env_init(conda, spec, force=force)
 
 
-# @cli.command()
-# @click.pass_obj
-# def lock(conda: Conda):
-#     """
-#     Lock the package specifications
-#     """
-#     spec = Specification()
-#     env_lock(conda, spec)
+@cli.command()
+@click.pass_obj
+def lock(conda: Conda):
+    """
+    Lock the package specifications
+    """
+    spec = Specification()
+    env_lock(conda, spec)
 
 
 @cli.command()
@@ -127,7 +144,7 @@ def update(conda: Conda, install: Optional[bool], prune: Optional[bool], force: 
 @click.option("--limit", type=int, default=5)
 @click.option("--deps", default=False, is_flag=True)
 @click.pass_obj
-def search(conda: Conda, pkg: str, platform: Optional[str], limit: int, deps: bool):
+def query(conda: Conda, pkg: str, platform: Optional[str], limit: int, deps: bool):
     spec = Specification()
     env_search(conda, spec, pkg, platform, limit, deps)
 
