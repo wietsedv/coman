@@ -63,9 +63,12 @@ class Environment:
 
     def run(self, args: List[str]):
         # "conda run" only works with regular conda
-        if self.conda.is_conda(standalone=False):
-            p = subprocess.run([self.conda.exe, "run", "--prefix", self.conda.env.prefix, "--no-capture-out", "--live-stream", *args])
-            exit(p.returncode)
+        # if self.conda.is_conda(standalone=False):
+        #     p = subprocess.run([self.conda.exe, "run", "--prefix", self.conda.env.prefix, "--no-capture-out", "--live-stream", *args])
+        #     exit(p.returncode)
+
+        if os.getenv("COMAN_ACTIVE"):
+            exit(subprocess.run(args).returncode)
 
         # workaround for other backends
         cmd = " ".join(args)

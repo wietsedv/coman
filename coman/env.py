@@ -488,7 +488,7 @@ def env_init(conda: Conda, spec: Specification, force: bool):
 
 
 def env_shell_hook(conda: Conda, quiet: bool, shell_type: str):
-    path_cmd = f'export PATH="{os.path.join(os.getcwd(), "bin")}:$PATH"'
+    env_cmd = f'export PATH="{os.path.join(os.getcwd(), "bin")}:$PATH"; export COMAN_ACTIVE=1'
 
     # Currently only works with conda or micromamba
     if not conda.is_micromamba():
@@ -496,10 +496,10 @@ def env_shell_hook(conda: Conda, quiet: bool, shell_type: str):
         if exe:
             if not quiet:
                 print("You can deactivate the environment with `conda deactivate`", file=sys.stderr)
-            print(f"eval \"$('{exe}' shell.{shell_type} hook)\" && conda activate \"{conda.env.prefix}\"; {path_cmd}")
+            print(f"eval \"$('{exe}' shell.{shell_type} hook)\" && conda activate \"{conda.env.prefix}\"; {env_cmd}")
             exit(0)
 
     if not quiet:
         print("You can deactivate the environment with `micromamba deactivate`", file=sys.stderr)
     exe = conda.exe if conda.is_micromamba() else micromamba_exe()
-    print(f"eval \"$('{exe}' shell hook -s {shell_type})\" && micromamba activate \"{conda.env.prefix}\"; {path_cmd}")
+    print(f"eval \"$('{exe}' shell hook -s {shell_type})\" && micromamba activate \"{conda.env.prefix}\"; {env_cmd}")
