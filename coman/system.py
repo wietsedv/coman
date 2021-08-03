@@ -27,7 +27,7 @@ class Environment:
         self.platform = platform_subdir()
         self.conda = conda
         self.name = f"{os.path.basename(cwd)}-{hash}"
-    
+
     @property
     def prefix(self):
         return self.conda.envs_dir / self.name
@@ -35,7 +35,7 @@ class Environment:
     @property
     def python(self):
         return self.prefix / "bin" / "python"
-    
+
     @property
     def python_version(self):
         if self.python.exists():
@@ -55,7 +55,7 @@ class Environment:
         if env_hash_file.exists():
             with open(env_hash_file) as f:
                 return f.read().strip()
-    
+
     def shell_hook(self, shell_type: str):
         exe_flag = " --micromamba" if self.conda.is_micromamba() else ""
         bin_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -72,30 +72,31 @@ class Environment:
             exit(subprocess.run(args).returncode)
 
         cmd = " ".join(args)
-        exit(subprocess.run([
-            "/usr/bin/env",
-            "bash",
-            "-c",
-            f"{self.shell_hook('bash')} && {cmd} && exit 0",
-        ]).returncode)
+        exit(
+            subprocess.run([
+                "/usr/bin/env",
+                "bash",
+                "-c",
+                f"{self.shell_hook('bash')} && {cmd} && exit 0",
+            ]).returncode)
+
 
 class Conda:
     def __init__(self,
+                 mamba: Optional[bool] = None,
                  conda: Optional[bool] = None,
                  conda_standalone: Optional[bool] = None,
-                 mamba: Optional[bool] = None,
                  micromamba: Optional[bool] = None) -> None:
-        if conda or conda_standalone or mamba or micromamba:
+        if mamba or conda or conda_standalone or micromamba:
+            self.mamba = mamba or False
             self.conda = conda or False
             self.conda_standalone = conda_standalone or False
-            self.mamba = mamba or False
             self.micromamba = micromamba or False
         else:
-            self.conda, self.conda_standalone, self.mamba, self.micromamba = True, True, True, True
+            self.mamba, self.conda, self.conda_standalone, self.micromamba = True, True, True, True
 
-        # TODO make lazy
         self.root = self._get_root()
-        self.exe = self._get_exe()
+        self._exe = None
 
         os.environ["CONDA_ENVS_PATH"] = os.getenv("CONDA_ENVS_PATH", f"{self.root}/envs")
         self.envs_dir = Path(os.environ["CONDA_ENVS_PATH"])
@@ -105,6 +106,22 @@ class Conda:
 
         self.env = Environment(self)
 
+    @property
+    def exe(self):
+        if self._exe:
+            return self._exe
+        if not self._exe and self.mamba:
+            self._exe = mamba_exe()
+        if not self._exe and self.conda:
+            self._exe = conda_exe()
+        if not self._exe and self.conda_standalone:
+            self._exe = conda_standalone_exe()
+        if not self._exe and self.micromamba:
+            self._exe = micromamba_exe()
+        if not self._exe:
+            click.secho("No valid Conda executable was found", fg="red", file=sys.stderr)
+            exit(1)
+        return self._exe
 
     def run(self, args: List[Any], capture: bool = True, check: bool = True, exe: Optional[Path] = None):
         exe = exe or self.exe
@@ -119,6 +136,9 @@ class Conda:
             print(p.stderr.strip(), file=sys.stderr)
         return p
 
+    def is_mamba(self) -> bool:
+        return self.exe.name == "mamba"
+
     def is_conda(self, standalone: Optional[bool] = None) -> bool:
         if standalone:
             return self.exe.name == "conda_standalone"
@@ -126,29 +146,11 @@ class Conda:
             return self.exe.name in ["conda", "conda_standalone"]
         return self.exe.name == "conda"
 
-    def is_mamba(self) -> bool:
-        return self.exe.name == "mamba"
-
     def is_micromamba(self) -> bool:
         return self.exe.name == "micromamba"
 
-    def _get_exe(self):
-        exe = None
-        if not exe and self.conda:
-            exe = conda_exe()
-        if not exe and self.conda_standalone:
-            exe = conda_standalone_exe()
-        if not exe and self.mamba:
-            exe = mamba_exe()
-        if not exe and self.micromamba:
-            exe = micromamba_exe()
-        if not exe:
-            click.secho("No valid Conda executable was found", fg="red", file=sys.stderr)
-            exit(1)
-        return exe
-    
     def _get_root(self):
-        root = os.getenv("CONDA_ROOT", os.getenv("MAMBA_ROOT_PREFIX"))
+        root = os.getenv("MAMBA_ROOT_PREFIX", os.getenv("CONDA_ROOT"))
         if root:
             _conda_root = Path(root)
             return _conda_root
@@ -194,6 +196,13 @@ def install_conda_standalone() -> Optional[Path]:
         dest_filename="conda_standalone",
     )
 
+
+def mamba_exe():
+    for exe in mamba_executables():
+        if determine_mamba_version(exe) >= MIN_MAMBA_VERSION:
+            return Path(exe)
+
+
 def conda_exe():
     for exe in conda_executables():
         if determine_conda_version(exe) >= MIN_CONDA_VERSION:
@@ -208,12 +217,6 @@ def conda_standalone_exe(install: bool = True):
     if install:
         exe = install_conda_standalone()
         if exe and determine_conda_version(exe) >= MIN_CONDA_VERSION:
-            return Path(exe)
-
-
-def mamba_exe():
-    for exe in mamba_executables():
-        if determine_mamba_version(exe) >= MIN_MAMBA_VERSION:
             return Path(exe)
 
 
@@ -270,6 +273,15 @@ def pypi_pkg_info(pkg: str):
 
 
 def conda_info():
+    # Mamba
+    mamba_exe = safe_next(mamba_executables())
+    mamba_ver = "n/a"
+    if mamba_exe:
+        mamba_ver = determine_mamba_version(mamba_exe)
+        mamba_state = "unsupported" if mamba_ver < MIN_MAMBA_VERSION else "ok"
+        mamba_ver = f"{mamba_ver} ({mamba_state}) [{mamba_exe}]"
+    print(f"> Mamba:            {mamba_ver}")
+
     # Conda
     conda_exe = safe_next(conda_executables())
     conda_ver = "n/a"
@@ -292,15 +304,6 @@ def conda_info():
     except IndexError:
         condastandalone_ver = "n/a"
     print(f"> Conda standalone: {condastandalone_ver}")
-
-    # Mamba
-    mamba_exe = safe_next(mamba_executables())
-    mamba_ver = "n/a"
-    if mamba_exe:
-        mamba_ver = determine_mamba_version(mamba_exe)
-        mamba_state = "unsupported" if mamba_ver < MIN_MAMBA_VERSION else "ok"
-        mamba_ver = f"{mamba_ver} ({mamba_state}) [{mamba_exe}]"
-    print(f"> Mamba:            {mamba_ver}")
 
     # Micromamba
     micromamba_exe = safe_next(micromamba_executables())

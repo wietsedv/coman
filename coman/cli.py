@@ -29,9 +29,9 @@ class AliasedGroup(click.Group):
 
 
 @click.group(cls=AliasedGroup, invoke_without_command=True)
+@click.option('--mamba/--no-mamba', default=None)
 @click.option('--conda/--no-conda', default=None)
 @click.option('--conda-standalone/--no-conda-standalone', default=None)
-@click.option('--mamba/--no-mamba', default=None)
 @click.option('--micromamba/--no-micromamba', default=None)
 @click.option("--platform", default=False, is_flag=True)
 @click.option("--root", default=False, is_flag=True)
@@ -43,9 +43,9 @@ class AliasedGroup(click.Group):
 @click.pass_context
 def cli(
     ctx: Context,
+    mamba: Optional[bool],
     conda: Optional[bool],
     conda_standalone: Optional[bool],
-    mamba: Optional[bool],
     micromamba: Optional[bool],
     platform: bool,
     root: bool,
@@ -54,7 +54,7 @@ def cli(
     prefix: bool,
     python_bin: bool,
 ):
-    conda_ = ctx.obj = Conda(conda, conda_standalone, mamba, micromamba)
+    conda_ = ctx.obj = Conda(mamba, conda, conda_standalone, micromamba)
     spec = Specification()
 
     if root:
@@ -207,6 +207,7 @@ def run_python(conda: Optional[Conda] = None, spec: Optional[Specification] = No
         args = sys.argv[1:]
     if install:
         env_install(conda, spec, quiet=True)
+    print(click.style("Python:", fg="cyan"), click.style(conda.env.python, fg="blue") + "\n", file=sys.stderr)
     exit(subprocess.run([conda.env.python, *args]).returncode)
 
 
