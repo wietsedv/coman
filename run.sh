@@ -1,2 +1,3 @@
-#!/usr/bin/env -S coman run bash
+#!/usr/bin/env coman-bash
+
 python -m coman "$@"

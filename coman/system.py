@@ -66,11 +66,11 @@ class Environment:
         # if self.conda.is_conda(standalone=False):
         #     p = subprocess.run([self.conda.exe, "run", "--prefix", self.conda.env.prefix, "--no-capture-out", "--live-stream", *args])
         #     exit(p.returncode)
+        print(click.style("Conda:", fg="green"), click.style(self.name, fg="blue") + "\n", file=sys.stderr)
 
         if os.getenv("COMAN_ACTIVE"):
             exit(subprocess.run(args).returncode)
 
-        # workaround for other backends
         cmd = " ".join(args)
         exit(subprocess.run([
             "/usr/bin/env",
