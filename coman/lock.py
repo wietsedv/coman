@@ -85,7 +85,7 @@ def search_for_md5s(conda: Conda, package_specs: List[dict], platform: str, chan
         except json.JSONDecodeError:
             print(out.stdout)
             print(out.stderr)
-            click.secho(f"\nCould not determine has for: {spec}", fg="red")
+            click.secho(f"\nCould not determine hash for: {spec}", fg="red", file=sys.stderr)
             exit(1)
         if name in content:
             assert len(content[name]) == 1
@@ -228,7 +228,7 @@ def fn_to_dist_name(fn: str) -> str:
 
 
 def create_lockfile_from_spec(conda: Conda, lock_spec: LockSpecification) -> List[str]:
-    print("Resolving dependencies", file=sys.stderr)
+    # print("Resolving dependencies", file=sys.stderr)
     dry_run_install = solve_specs_for_arch(conda, lock_spec)
 
     lockfile_contents = [
@@ -253,28 +253,32 @@ def create_lockfile_from_spec(conda: Conda, lock_spec: LockSpecification) -> Lis
         link["url"] = f"{link['url_base']}.tar.bz2"
         link["url_conda"] = f"{link['url_base']}.conda"
 
-    link_dists = {link["dist_name"] for link in link_actions}
+    # link_dists = {link["dist_name"] for link in link_actions}
     fetch_by_dist_name = {fn_to_dist_name(pkg["fn"]): pkg for pkg in fetch_actions}
 
-    print("Determining hashes", file=sys.stderr)
+    # print("Determining hashes", file=sys.stderr)
 
-    non_fetch_packages = link_dists - set(fetch_by_dist_name)
-    if len(non_fetch_packages) > 0:
-        for search_res in search_for_md5s(
-                conda=conda,
-                package_specs=[x for x in link_actions if x["dist_name"] in non_fetch_packages],
-                platform=lock_spec.platform,
-                channels=lock_spec.channels,
-        ):
-            dist_name = fn_to_dist_name(search_res["fn"])
-            fetch_by_dist_name[dist_name] = search_res
-            print(f"- {dist_name}", file=sys.stderr)
+    # non_fetch_packages = link_dists - set(fetch_by_dist_name)
+    # if len(non_fetch_packages) > 0:
+    #     for search_res in search_for_md5s(
+    #             conda=conda,
+    #             package_specs=[x for x in link_actions if x["dist_name"] in non_fetch_packages],
+    #             platform=lock_spec.platform,
+    #             channels=lock_spec.channels,
+    #     ):
+    #         dist_name = fn_to_dist_name(search_res["fn"])
+    #         fetch_by_dist_name[dist_name] = search_res
+    #         print(f"- {dist_name}", file=sys.stderr)
 
     for pkg in link_actions:
         dist_name = (fn_to_dist_name(pkg["fn"]) if conda.is_micromamba() else pkg["dist_name"])
-        url = fetch_by_dist_name[dist_name]["url"]
-        md5 = fetch_by_dist_name[dist_name]["md5"]
-        lockfile_contents.append(f"{url}#{md5}")
+        if dist_name in fetch_by_dist_name:
+            url = fetch_by_dist_name[dist_name]["url"]
+            md5 = fetch_by_dist_name[dist_name]["md5"]
+            lockfile_contents.append(f"{url}#{md5}")
+        else:
+            url = pkg["url"]
+            lockfile_contents.append(url)
 
     def sanitize_lockfile_line(line):
         line = line.strip()

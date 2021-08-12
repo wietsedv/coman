@@ -407,7 +407,7 @@ def env_show(conda: Conda,
         line = format_pkg_line(pkg_info, col_lengths)
         if warning:
             line = f"- {line}  {click.style(warning, fg='yellow')}"
-        print(line)
+        print(line, file=sys.stderr)
 
     return pkg_infos
 

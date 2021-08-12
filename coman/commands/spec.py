@@ -190,12 +190,12 @@ def dependency_list():
     conda_infos, pip_infos = spec.dependency_infos()
     col_lengths = pkg_col_lengths(conda_infos + pip_infos, ["name", "version", "comment"])
 
-    click.secho("Conda", fg="green", bold=True)
+    click.secho("Conda", fg="green", bold=True, file=sys.stderr)
     for pkg_info in conda_infos:
         print(f"- {format_pkg_line(pkg_info, col_lengths)}")
 
     if pip_infos:
-        click.secho("\nPip", fg="cyan", bold=True)
+        click.secho("\nPip", fg="cyan", bold=True, file=sys.stderr)
         for pkg_info in pip_infos:
             print(f"- {format_pkg_line(pkg_info, col_lengths)}")
 
