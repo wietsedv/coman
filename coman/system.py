@@ -82,6 +82,8 @@ class Environment:
 
 
 class Conda:
+    _exe = None
+
     def __init__(self,
                  mamba: Optional[bool] = None,
                  conda: Optional[bool] = None,
@@ -96,7 +98,6 @@ class Conda:
             self.mamba, self.conda, self.conda_standalone, self.micromamba = True, True, True, True
 
         self.root = self._get_root()
-        self._exe = None
 
         os.environ["CONDA_ENVS_PATH"] = os.getenv("CONDA_ENVS_PATH", f"{self.root}/envs")
         self.envs_dir = Path(os.environ["CONDA_ENVS_PATH"])
