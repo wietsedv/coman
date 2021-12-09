@@ -152,17 +152,17 @@ def query(conda: Conda, pkg: str, platform: Optional[str], limit: int, deps: boo
 @cli.command()
 @click.argument("query", nargs=-1)
 @click.option("--install/--no-install", default=True)
-@click.option("--deps/--no-deps", default=False, help="Include installed dependencies of your packages.")
+@click.option("--all", default=False, is_flag=True)
 @click.option("--pip/--no-pip", default=None)
 @click.pass_obj
-def show(conda: Conda, query: List[str], install: bool, deps: bool, pip: Optional[bool]):
+def show(conda: Conda, query: List[str], install: bool, all: bool, pip: Optional[bool]):
     """
     Show packages in the current environment
     """
     spec = Specification()
     if install:
         env_install(conda, spec, quiet=True)
-    env_show(conda, spec, query, deps, pip)
+    env_show(conda, spec, query, all, pip)
 
 
 @cli.command()

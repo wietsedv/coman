@@ -262,7 +262,7 @@ def env_install(conda: Conda,
         click.secho(f"You can add it with: `coman platform add {conda.env.platform}`", fg="red", file=sys.stderr)
         exit(1)
 
-    old_pkgs = env_show(conda, spec, deps=True, only_return=True) if show and conda.env.prefix.exists() else []
+    old_pkgs = env_show(conda, spec, all=True, only_return=True) if show and conda.env.prefix.exists() else []
 
     use_pip = bool(spec_pip_requirements(spec))
     if not conda_lock_file(conda.env.platform).exists() or (use_pip and not pip_lock_file().exists()):
@@ -316,7 +316,7 @@ def env_install(conda: Conda,
 
     print(file=sys.stderr)
     if show:
-        new_pkgs = env_show(conda, spec, deps=True, only_return=True)
+        new_pkgs = env_show(conda, spec, all=True, only_return=True)
         if new_pkgs != old_pkgs:
             new_pkg_names = [pkg_info["name"] for pkg_info in new_pkgs]
             old_pkg_names = [pkg_info["name"] for pkg_info in old_pkgs]
@@ -369,7 +369,7 @@ def env_uninstall(conda: Conda):
 def env_show(conda: Conda,
              spec: Specification,
              query: List[str] = [],
-             deps: bool = False,
+             all: bool = False,
              pip: Optional[bool] = None,
              only_return: bool = False):
     p = conda.run(["list", "--prefix", conda.env.prefix, *query, "--json"])
@@ -387,7 +387,7 @@ def env_show(conda: Conda,
         pip_comments = pip_lock_comments()
         for pkg_info in pkg_infos:
             pkg_info["comment"] = pip_comments.get(pkg_info["name"], "")
-    elif not deps:
+    elif not all:
         pkg_infos = [x for x in pkg_infos if x["name"] in conda_names or x["name"] in pip_names]
 
     if only_return:

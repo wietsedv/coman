@@ -1,2 +1,5 @@
 .eggs
 *.egg-info
+
+.vscode
+TODO.md
